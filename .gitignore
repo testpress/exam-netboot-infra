@@ -1,0 +1,55 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Temporary build artifacts
+*.tmp
+*.log
+*.bak
+*.swp
+*.lock
+
+# Root filesystem build outputs
+rootfs/*.img
+rootfs/*.iso
+rootfs/*.squashfs
+rootfs/build/
+rootfs/output/
+rootfs/work/
+rootfs/tmp/
+rootfs/cache/
+
+# Compressed builds
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.xz
+
+# PXE/TFTP temporary files
+pxe/tftp/boot/*.old
+pxe/tftp/pxelinux.cfg/*.old
+pxe/tftp/*.bak
+
+# System-specific configs (should be templated instead)
+pxe/dhcp/local.conf
+pxe/tftp/local.conf
+security/local/
+
+# Generated configuration artifacts
+*.cfg.bak
+*.conf.bak
+*.yaml.bak
+
+# Credentials and secrets (should never be tracked)
+*.key
+*.crt
+*.pem
+*.enc
+secrets/
+*.secret
+*.passwd
+
+# Editor directories
+.vscode/
+.idea/
