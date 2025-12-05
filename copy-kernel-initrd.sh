@@ -1,48 +1,68 @@
 #!/bin/bash
 set -euo pipefail
 
-TFTP_BOOT="/var/lib/tftpboot/boot/casper"
-WEBROOT="/var/www/html/desktop/u2404"
-VMLINZ_PATH="$WEBROOT/casper/vmlinuz"
-INITRD_PATH="$WEBROOT/casper/initrd"
-TFTP_VMLINZ="$TFTP_BOOT/vmlinuz"
-TFTP_INITRD="$TFTP_BOOT/initrd"
-
-echo "=== copy-kernel-initrd.sh ==="
+# copy-kernel-initrd.sh
+# Copies kernel + initrd from the extracted ISO webroot into TFTP boot area (/var/lib/tftpboot/boot/casper).
+# Accepts optional overrides: WEBROOT (source) and TFTP_BOOT (destination)
 
 if [ "$EUID" -ne 0 ]; then
-  echo "[FATAL] Run as root: sudo ./copy-kernel-initrd.sh"
+  echo "[FATAL] Run as root: sudo $0"
   exit 1
 fi
 
-# Validate source files exist
-if [ ! -f "$VMLINZ_PATH" ] && [ ! -f "$WEBROOT/casper/vmlinuz.efi" ]; then
-  echo "[FATAL] Kernel not found under $WEBROOT/casper. Ensure ISO was extracted."
-  exit 1
-fi
+WEBROOT="${WEBROOT:-/var/www/pxe/desktop/u2404}"
+TFTP_BOOT="${TFTP_BOOT:-/var/lib/tftpboot/boot/casper}"
 
-if [ ! -f "$INITRD_PATH" ]; then
-  # sometimes initrd name is initrd.lz or initrd.gz
-  alt="$(ls $WEBROOT/casper | grep -E 'initrd|initramfs' | head -n1 || true)"
-  if [ -n "$alt" ]; then
-    INITRD_PATH="$WEBROOT/casper/$alt"
-  else
-    echo "[FATAL] initrd not found under $WEBROOT/casper. Ensure ISO was extracted."
-    exit 1
+die(){ echo "[FATAL] $*" >&2; exit 1; }
+info(){ echo "[*] $*"; }
+ok(){ echo "[✔] $*"; }
+
+info "Locating kernel and initrd inside $WEBROOT..."
+
+# Prefer common names; try multiple fallbacks
+KERNEL_CANDIDATES=("$WEBROOT/casper/vmlinuz" "$WEBROOT/boot/vmlinuz" "$WEBROOT/vmlinuz" )
+INITRD_CANDIDATES=("$WEBROOT/casper/initrd" "$WEBROOT/casper/initrd.lz" "$WEBROOT/casper/initrd.xz" "$WEBROOT/boot/initrd" "$WEBROOT/initrd")
+
+KERNEL=""
+INITRD=""
+
+for f in "${KERNEL_CANDIDATES[@]}"; do
+  if [ -f "$f" ]; then
+    KERNEL="$f"
+    break
   fi
+done
+
+for f in "${INITRD_CANDIDATES[@]}"; do
+  if [ -f "$f" ]; then
+    INITRD="$f"
+    break
+  fi
+done
+
+if [ -z "$KERNEL" ]; then
+  die "Kernel not found in webroot. Checked: ${KERNEL_CANDIDATES[*]}"
 fi
+
+if [ -z "$INITRD" ]; then
+  die "Initrd not found in webroot. Checked: ${INITRD_CANDIDATES[*]}"
+fi
+
+info "Kernel found: $KERNEL"
+info "Initrd found: $INITRD"
 
 mkdir -p "$TFTP_BOOT"
 
-echo "[*] Copying kernel and initrd to tftpboot..."
-cp -v "$VMLINZ_PATH" "$TFTP_VMLINZ"
-cp -v "$INITRD_PATH" "$TFTP_INITRD"
+TFTP_KERNEL="$TFTP_BOOT/$(basename "$KERNEL")"
+TFTP_INITRD="$TFTP_BOOT/$(basename "$INITRD")"
 
-chmod 644 "$TFTP_VMLINZ" "$TFTP_INITRD"
+info "Copying kernel -> $TFTP_KERNEL"
+cp -v "$KERNEL" "$TFTP_KERNEL"
+info "Copying initrd -> $TFTP_INITRD"
+cp -v "$INITRD" "$TFTP_INITRD"
 
-echo "[✔] Kernel and initrd copied to $TFTP_BOOT"
-echo "    - $TFTP_VMLINZ"
-echo "    - $TFTP_INITRD"
+chmod 644 "$TFTP_KERNEL" "$TFTP_INITRD" || true
 
+ok "Kernel and initrd copied to $TFTP_BOOT"
 exit 0
 

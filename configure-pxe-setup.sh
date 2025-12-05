@@ -1,130 +1,165 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-### CONFIG ###
-SERVER_IP="192.168.1.160"
-NET_RANGE="192.168.1.0/24"
-IFACE="enp0s31f6"
-ISO_PATH="ubuntu-24.04.3-desktop-amd64.iso"
-WEBROOT="/var/www/html/desktop/u2404"
+# configure-pxe-setup.sh
+# Creates TFTP/HTTP/NFS layout, downloads ISO from your cloud bucket (ISO_URL),
+# extracts it into webroot, configures /etc/exports and /etc/dnsmasq.d/pxe.conf,
+# creates a minimal nginx site to serve webroot and restarts services.
 
-echo "=== PXE Server Configuration ==="
-
-### 1️⃣ CHECK PREREQUISITES ###
-echo "[*] Validating environment…"
-
-if ! command -v apache2 >/dev/null 2>&1; then
-    echo "[FATAL] Apache2 is not installed. Cannot proceed."
-    exit 1
+if [ "$EUID" -ne 0 ]; then
+  echo "[FATAL] Run as root: sudo $0"
+  exit 1
 fi
 
-if ! command -v dnsmasq >/dev/null 2>&1; then
-    echo "[FATAL] dnsmasq is not installed. Cannot proceed."
-    exit 1
-fi
+### CONFIG - change as needed ###
+SERVER_IP="${SERVER_IP:-192.168.1.160}"
+NET_RANGE="${NET_RANGE:-192.168.1.0/24}"
+IFACE="${IFACE:-enp0s31f6}"
+ISO_URL="${ISO_URL:-}"            # e.g. "https://your-bucket.example.com/Porteus-Kiosk.iso"
+ISO_LOCAL="${ISO_LOCAL:-/opt/isos/pxe.iso}"
+WEBROOT_BASE="${WEBROOT_BASE:-/var/www/pxe}"
+WEBROOT="${WEBROOT:-$WEBROOT_BASE/desktop/u2404}"
+TFTP_ROOT="${TFTP_ROOT:-/var/lib/tftpboot}"
+MOUNT_POINT="${MOUNT_POINT:-/media/iso_pxe_mount}"
+DNSMASQ_CONF="/etc/dnsmasq.d/pxe.conf"
+NGINX_SITE="/etc/nginx/sites-available/pxe"
 
-if ! command -v exportfs >/dev/null 2>&1; then
-    echo "[FATAL] NFS server tools are missing. Cannot proceed."
-    exit 1
-fi
+die(){ echo "[FATAL] $*" >&2; exit 1; }
+info(){ echo "[*] $*"; }
+ok(){ echo "[✔] $*"; }
 
-if [ ! -f "$ISO_PATH" ]; then
-    echo "[FATAL] ISO file not found: $ISO_PATH"
-    echo "        Place the Ubuntu ISO in this directory and retry."
-    exit 1
-fi
+# Ensure required commands exist
+for cmd in nginx dnsmasq exportfs mount umount wget; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    die "Required command not found: $cmd. Install dependencies first."
+  fi
+done
 
-if ! ip addr show "$IFACE" >/dev/null 2>&1; then
-    echo "[FATAL] Network interface '$IFACE' does not exist."
-    echo "        Run: ip a  to find correct interface name."
-    exit 1
-fi
-
-echo "[✔] Environment validated."
-
-
-### 2️⃣ CREATE FOLDERS ###
-echo "[*] Creating directory structure…"
-
-mkdir -p /var/lib/tftpboot/{bios,boot,grub}
+info "Creating directories..."
+mkdir -p "$TFTP_ROOT"/{bios,boot,grub}
 mkdir -p "$WEBROOT"
+mkdir -p "$MOUNT_POINT"
+mkdir -p "$(dirname "$ISO_LOCAL")"
 
-echo "[✔] Directory structure ready."
-
-
-### 3️⃣ COPY ISO CONTENTS ###
-echo "[*] Extracting ISO into webroot…"
-
-mount -o loop "$ISO_PATH" /media || {
-    echo "[FATAL] Failed to mount ISO."
+# Download ISO if ISO_URL provided
+if [ -n "$ISO_URL" ]; then
+  info "Downloading ISO from: $ISO_URL"
+  # download with resume and follow redirects
+  if ! wget -c -O "$ISO_LOCAL" "$ISO_URL"; then
+    die "Failed to download ISO from $ISO_URL"
+  fi
+  ok "ISO downloaded to $ISO_LOCAL"
+else
+  if [ ! -f "$ISO_LOCAL" ]; then
+    echo "[FATAL] No ISO_URL provided and $ISO_LOCAL not found."
+    echo "Place ISO at $ISO_LOCAL or set ISO_URL env var."
     exit 1
-}
+  fi
+fi
 
-cp -rf /media/* "$WEBROOT" || {
-    echo "[FATAL] Failed copying ISO contents."
-    umount /media
-    exit 1
-}
+# Basic sanity of ISO file size
+if [ ! -s "$ISO_LOCAL" ]; then
+  die "ISO file is empty or missing: $ISO_LOCAL"
+fi
 
-cp -rf /media/.disk "$WEBROOT"
-umount /media
+info "Mounting ISO and extracting to webroot..."
+if mountpoint -q "$MOUNT_POINT"; then
+  umount "$MOUNT_POINT" || true
+fi
 
-echo "[✔] ISO extracted successfully."
+if ! mount -o loop "$ISO_LOCAL" "$MOUNT_POINT"; then
+  die "Failed to mount ISO $ISO_LOCAL at $MOUNT_POINT"
+fi
 
+# Copy contents
+if ! cp -a "$MOUNT_POINT"/. "$WEBROOT"/; then
+  umount "$MOUNT_POINT" || true
+  die "Failed copying ISO contents to $WEBROOT"
+fi
 
-### 4️⃣ CONFIGURE NFS ###
-echo "[*] Configuring NFS export…"
+# ensure .disk if exists is copied
+if [ -e "$MOUNT_POINT/.disk" ]; then
+  cp -a "$MOUNT_POINT/.disk" "$WEBROOT"/ || true
+fi
 
-/bin/cat <<EOF >/etc/exports
-/var/www/html/desktop $NET_RANGE(ro)
+umount "$MOUNT_POINT"
+ok "ISO extracted to $WEBROOT"
+
+### Configure NFS exports
+info "Configuring NFS exports..."
+cat > /etc/exports <<EOF
+$WEBROOT_BASE $NET_RANGE(ro,no_subtree_check,async)
 EOF
 
 if ! exportfs -ra; then
-    echo "[FATAL] Failed to apply NFS export."
-    exit 1
+  die "exportfs -ra failed"
 fi
+ok "NFS exports configured: $WEBROOT_BASE -> $NET_RANGE (ro)"
 
-echo "[✔] NFS export configured."
-
-
-### 5️⃣ CONFIGURE DNSMASQ ###
-echo "[*] Writing dnsmasq PXE configuration…"
-
-/bin/cat <<EOF >/etc/dnsmasq.d/pxe.conf
+### Configure dnsmasq
+info "Writing dnsmasq config to $DNSMASQ_CONF"
+cat > "$DNSMASQ_CONF" <<EOF
 interface=$IFACE
 bind-interfaces
 
+# DHCP range
 dhcp-range=192.168.1.170,192.168.1.200,12h
 
+# Boot files for BIOS and UEFI
 dhcp-match=set:efi64,option:client-arch,7
 dhcp-boot=tag:efi64,grub/bootx64.efi
 dhcp-boot=/bios/pxelinux.0
 
 enable-tftp
-tftp-root=/var/lib/tftpboot
+tftp-root=$TFTP_ROOT
 
-dhcp-option=3,192.168.1.1
-dhcp-option=6,192.168.1.1
+dhcp-option=3,${SERVER_IP}
+dhcp-option=6,${SERVER_IP}
 
 log-dhcp
 log-queries
 log-facility=/var/log/dnsmasq.log
 EOF
+ok "dnsmasq config written"
 
-echo "[✔] dnsmasq config ready."
+### Configure nginx site
+info "Creating nginx site for $WEBROOT_BASE"
+cat > "$NGINX_SITE" <<'EOF'
+server {
+    listen 80 default_server;
+    server_name _;
 
+    root /var/www/pxe;
+    autoindex on;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
 
-### 6️⃣ RESTART SERVICES ###
-echo "[*] Restarting services…"
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+EOF
 
-systemctl restart apache2 || { echo "[FATAL] Apache failed."; exit 1; }
-systemctl restart nfs-kernel-server || { echo "[FATAL] NFS failed."; exit 1; }
-systemctl restart dnsmasq || { echo "[FATAL] dnsmasq failed."; exit 1; }
+ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/pxe
+if [ -f /etc/nginx/sites-enabled/default ]; then rm -f /etc/nginx/sites-enabled/default; fi
 
-echo "========================================="
-echo "[✔] PXE server configuration completed."
-echo "    Webroot: $WEBROOT"
-echo "    TFTP:    /var/lib/tftpboot"
-echo "    NFS:     /etc/exports"
-echo "========================================="
+chown -R www-data:www-data "$WEBROOT_BASE" || true
+chmod -R 755 "$WEBROOT_BASE" || true
+ok "nginx site enabled"
+
+### Restart services
+info "Restarting services..."
+systemctl restart nginx || die "nginx failed to restart"
+systemctl restart nfs-kernel-server || die "nfs-kernel-server failed to restart"
+systemctl restart dnsmasq || die "dnsmasq failed to restart"
+ok "Services restarted"
+
+echo "=========================================="
+echo "[✔] configure-pxe-setup complete"
+echo "    WEBROOT: $WEBROOT"
+echo "    TFTP:    $TFTP_ROOT"
+echo "    ISO:     $ISO_LOCAL"
+echo "=========================================="
+exit 0
 
