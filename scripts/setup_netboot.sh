@@ -4,8 +4,9 @@ set -e
 SERVER_IP="10.0.0.1"
 HTTP_PORT="9000"
 
-DEBIAN_ISO_URL="https://saimei.ftp.acc.umu.se/debian-cd/current/amd64/iso-cd/debian-13.2.0-amd64-netinst.iso"
-DEBIAN_ISO_PATH="/opt/debian-netinst.iso"
+# ✅ USE THE LIVE ISO — NOT NETINST
+DEBIAN_ISO_URL="https://saimei.ftp.acc.umu.se/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.2.0-amd64-standard.iso"
+DEBIAN_ISO_PATH="/opt/debian-live.iso"
 DEBIAN_MOUNT="/mnt/debianiso"
 
 TARGET_DIR="/var/www/html/debian"
@@ -13,6 +14,7 @@ IPXE_DIR="/var/www/html/ipxe"
 
 CONFIG_DIR="../config"
 PXE_DIR="../pxe"
+
 
 echo "=============================================="
 echo "[1] Validating config + PXE files..."
@@ -75,6 +77,7 @@ sudo wget -O /srv/tftp/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
 
 sudo chmod 644 /srv/tftp/ipxe.efi
 sudo chmod 644 /srv/tftp/undionly.kpxe
+
 echo "[OK] iPXE bootloaders downloaded."
 
 
@@ -96,27 +99,28 @@ sudo systemctl restart dnsmasq
 
 echo ""
 echo "=============================================="
-echo "[7] Fetching Debian ISO (cached)..."
+echo "[7] Fetching Debian LIVE ISO (cached)..."
 echo "=============================================="
 
 if [ -f "$DEBIAN_ISO_PATH" ]; then
     echo "[OK] Reusing cached ISO at $DEBIAN_ISO_PATH"
 else
-    echo "[*] Downloading Debian ISO..."
+    echo "[*] Downloading Debian LIVE ISO..."
     sudo wget -O "$DEBIAN_ISO_PATH" "$DEBIAN_ISO_URL"
 fi
 
 sudo mount -o loop "$DEBIAN_ISO_PATH" "$DEBIAN_MOUNT"
-echo "[OK] ISO mounted."
+echo "[OK] LIVE ISO mounted."
 
 
 echo ""
 echo "=============================================="
-echo "[8] Extracting Debian kernel + initrd..."
+echo "[8] Extracting live kernel + initrd..."
 echo "=============================================="
 
-sudo cp "$DEBIAN_MOUNT/install.amd/vmlinuz" "$TARGET_DIR/vmlinuz"
-sudo cp "$DEBIAN_MOUNT/install.amd/initrd.gz" "$TARGET_DIR/initrd.gz"
+# ✅ Live ISO stores these in /live/, NOT /install.amd/
+sudo cp "$DEBIAN_MOUNT/live/vmlinuz" "$TARGET_DIR/vmlinuz"
+sudo cp "$DEBIAN_MOUNT/live/initrd.img" "$TARGET_DIR/initrd.img"
 
 sudo umount "$DEBIAN_MOUNT"
 
@@ -133,6 +137,7 @@ sudo rm -rf "$ROOTFS"
 sudo mkdir -p "$ROOTFS"
 
 sudo debootstrap --variant=minbase stable "$ROOTFS" http://deb.debian.org/debian
+
 echo "[OK] Base rootfs created."
 
 
@@ -181,6 +186,7 @@ echo "[12] Building minimal.squashfs..."
 echo "=============================================="
 
 sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
+
 echo "[OK] squashfs built."
 
 
@@ -188,6 +194,7 @@ echo ""
 echo "=============================================="
 echo "[13] Setting permissions..."
 echo "=============================================="
+
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
@@ -201,7 +208,7 @@ sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
 
 echo ""
 echo "=============================================="
-echo "[15] Restarting nginx + dnsmasq..."
+echo "[15] Restarting services..."
 echo "=============================================="
 sudo systemctl restart nginx
 sudo systemctl restart dnsmasq
@@ -214,7 +221,7 @@ echo "=============================================="
 echo "HTTP Server:  http://${SERVER_IP}:${HTTP_PORT}/"
 echo "PXE Script:   http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
 echo "Kernel:       $TARGET_DIR/vmlinuz"
-echo "Initrd:       $TARGET_DIR/initrd.gz"
+echo "Initrd:       $TARGET_DIR/initrd.img"
 echo "SquashFS:     $TARGET_DIR/minimal.squashfs"
 echo ""
 

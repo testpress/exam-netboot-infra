@@ -1,10 +1,9 @@
 #!ipxe
-
 dhcp
 set base http://10.0.0.1:9000/debian
 
-echo Booting Debian Minimal Kiosk from ${base}
+kernel ${base}/vmlinuz boot=live fetch=${base}/minimal.squashfs toram
+initrd ${base}/initrd.img
 
-kernel http://10.0.0.1:9000/debian/vmlinuz boot=live fetch=http://10.0.0.1:9000/debian/minimal.squashfs toram
-initrd http://10.0.0.1:9000/debian/initrd.gz
 boot
+
