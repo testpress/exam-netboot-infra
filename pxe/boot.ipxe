@@ -1,18 +1,10 @@
 #!ipxe
 
 dhcp
-set base http://10.0.0.1:9000/porteus
+set base http://10.0.0.1:9000/debian
 
-echo Booting Porteus Kiosk from ${base}
+echo Booting Debian Minimal Kiosk from ${base}
 
-kernel ${base}/vmlinuz kiosk_config=${base}/kiosk.cfg from=${base} ramdisk_size=500000
-
-initrd ${base}/initrd.xz
-
-imgfetch ${base}/base/000-kernel.xzm
-imgfetch ${base}/base/001-core.xzm
-imgfetch ${base}/base/002-firefox.xzm
-imgfetch ${base}/base/003-settings.xzm
-
+kernel http://10.0.0.1:9000/debian/vmlinuz boot=live fetch=http://10.0.0.1:9000/debian/minimal.squashfs toram
+initrd http://10.0.0.1:9000/debian/initrd.gz
 boot
-
