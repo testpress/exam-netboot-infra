@@ -1,33 +1,18 @@
 #!ipxe
 
-# ----------------------------
-# Network Setup
-# ----------------------------
 dhcp
-set base http://10.0.0.1/porteus
+set base http://10.0.0.1:9000/porteus
 
 echo Booting Porteus Kiosk from ${base}
 
-# ----------------------------
-# Load Kernel + Kiosk Config
-# ----------------------------
-kernel ${base}/vmlinuz kiosk_config=${base}/kiosk.cfg
+kernel ${base}/vmlinuz kiosk_config=${base}/kiosk.cfg from=${base} ramdisk_size=500000
 
-# ----------------------------
-# Load Initrd
-# ----------------------------
 initrd ${base}/initrd.xz
 
-# ----------------------------
-# Load Porteus Base Modules (.xzm)
-# ----------------------------
 imgfetch ${base}/base/000-kernel.xzm
 imgfetch ${base}/base/001-core.xzm
 imgfetch ${base}/base/002-firefox.xzm
 imgfetch ${base}/base/003-settings.xzm
 
-# ----------------------------
-# Boot the System
-# ----------------------------
 boot
 
