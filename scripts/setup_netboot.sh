@@ -15,7 +15,7 @@ CONFIG_DIR="../config"
 PXE_DIR="../pxe"
 
 echo "=============================================="
-echo "[1] Checking config + PXE files exist..."
+echo "[1] Validating config + PXE files..."
 echo "=============================================="
 
 REQUIRED_FILES=(
@@ -31,33 +31,21 @@ for file in "${REQUIRED_FILES[@]}"; do
         exit 1
     fi
 done
-
-echo "[OK] All config files found."
+echo "[OK] All config + PXE files found."
 
 
 echo ""
 echo "=============================================="
-echo "[2] Installing system packages..."
+echo "[2] Installing required system packages..."
 echo "=============================================="
-
 sudo apt update -y
 sudo apt install -y dnsmasq nginx wget
 
 
 echo ""
 echo "=============================================="
-echo "[3] Applying nginx config (port ${HTTP_PORT})..."
+echo "[3] Creating directory structure..."
 echo "=============================================="
-
-sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
-sudo systemctl restart nginx
-
-
-echo ""
-echo "=============================================="
-echo "[4] Creating directory structure..."
-echo "=============================================="
-
 sudo mkdir -p /srv/tftp
 sudo mkdir -p $TARGET_DIR/base
 sudo mkdir -p $IPXE_DIR
@@ -65,27 +53,36 @@ sudo mkdir -p $IPXE_DIR
 
 echo ""
 echo "=============================================="
+echo "[4] Downloading iPXE bootloaders..."
+echo "=============================================="
+sudo wget -O /srv/tftp/ipxe.efi https://boot.ipxe.org/ipxe.efi
+sudo wget -O /srv/tftp/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
+
+sudo chmod 644 /srv/tftp/ipxe.efi
+sudo chmod 644 /srv/tftp/undionly.kpxe
+echo "[OK] Downloaded ipxe.efi and undionly.kpxe"
+
+
+echo ""
+echo "=============================================="
 echo "[5] Copying boot.ipxe + kiosk.cfg..."
 echo "=============================================="
-
 sudo cp "$PXE_DIR/boot.ipxe" $IPXE_DIR/
 sudo cp "$PXE_DIR/kiosk.cfg" $TARGET_DIR/
 
 
 echo ""
 echo "=============================================="
-echo "[6] Applying dnsmasq config..."
+echo "[6] Applying dnsmasq configuration..."
 echo "=============================================="
-
 sudo cp "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.conf
 sudo systemctl restart dnsmasq
 
 
 echo ""
 echo "=============================================="
-echo "[7] Downloading ISO..."
+echo "[7] Downloading Porteus ISO..."
 echo "=============================================="
-
 wget -O "$ISO_PATH" "$ISO_URL"
 
 
@@ -99,33 +96,38 @@ sudo mount -o loop "$ISO_PATH" "$MOUNT_DIR"
 
 sudo cp "$MOUNT_DIR/boot/vmlinuz" "$TARGET_DIR/"
 sudo cp "$MOUNT_DIR/boot/initrd.xz" "$TARGET_DIR/"
-sudo cp "$MOUNT_DIR/xzm/*.xzm" "$TARGET_DIR/base/"
+
+sudo cp "$MOUNT_DIR/xzm/"*.xzm "$TARGET_DIR/base/"
 
 sudo umount "$MOUNT_DIR"
 rm -f "$ISO_PATH"
 
-
 echo ""
 echo "=============================================="
-echo "[9] Setting permissions..."
+echo "[9] Setting file permissions..."
 echo "=============================================="
-
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
 
 echo ""
 echo "=============================================="
-echo "[10] Restarting services..."
+echo "[10] Applying nginx configuration..."
 echo "=============================================="
+sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
 
+
+echo ""
+echo "=============================================="
+echo "[11] Restarting services..."
+echo "=============================================="
 sudo systemctl restart nginx
 sudo systemctl restart dnsmasq
 
 
 echo ""
 echo "=============================================="
-echo "              SETUP COMPLETE 🎉"
+echo "          SETUP COMPLETE 🎉"
 echo "=============================================="
 echo "HTTP Server:  http://${SERVER_IP}:${HTTP_PORT}/"
 echo "Boot Script:  http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
@@ -134,6 +136,6 @@ echo "Initrd:       $TARGET_DIR/initrd.xz"
 echo "Modules:      $TARGET_DIR/base/"
 echo "kiosk.cfg:    $TARGET_DIR/kiosk.cfg"
 echo ""
-echo "READY FOR PXE BOOTING."
+echo "PXE/iPXE + Porteus Kiosk boot server is READY."
 echo ""
 
