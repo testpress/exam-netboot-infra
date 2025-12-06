@@ -41,7 +41,7 @@ echo "[2] Installing system packages..."
 echo "=============================================="
 
 sudo apt update -y
-sudo apt install -y dnsmasq nginx wget curl
+sudo apt install -y dnsmasq nginx wget
 
 
 echo ""
@@ -99,7 +99,7 @@ sudo mount -o loop "$ISO_PATH" "$MOUNT_DIR"
 
 sudo cp "$MOUNT_DIR/boot/vmlinuz" "$TARGET_DIR/"
 sudo cp "$MOUNT_DIR/boot/initrd.xz" "$TARGET_DIR/"
-sudo cp "$MOUNT_DIR/porteus/base/"*.xzm "$TARGET_DIR/base/"
+sudo cp "$MOUNT_DIR/xzm/*.xzm" "$TARGET_DIR/base/"
 
 sudo umount "$MOUNT_DIR"
 rm -f "$ISO_PATH"
