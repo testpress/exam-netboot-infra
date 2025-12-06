@@ -4,17 +4,16 @@ set -e
 SERVER_IP="10.0.0.1"
 HTTP_PORT="9000"
 
-# ✅ USE THE LIVE ISO — NOT NETINST
-DEBIAN_ISO_URL="https://saimei.ftp.acc.umu.se/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.2.0-amd64-standard.iso"
-DEBIAN_ISO_PATH="/opt/debian-live.iso"
-DEBIAN_MOUNT="/mnt/debianiso"
+# ✅ Lubuntu 24.04.1 LTS LIVE ISO
+LUBUNTU_ISO_URL="https://cdimage.ubuntu.com/lubuntu/releases/questing/release/lubuntu-25.10-desktop-amd64.iso"
+LUBUNTU_ISO_PATH="/opt/lubuntu-live.iso"
+LUBUNTU_MOUNT="/mnt/lubuntu"
 
-TARGET_DIR="/var/www/html/debian"
+TARGET_DIR="/var/www/html/lubuntu"
 IPXE_DIR="/var/www/html/ipxe"
 
 CONFIG_DIR="../config"
 PXE_DIR="../pxe"
-
 
 echo "=============================================="
 echo "[1] Validating config + PXE files..."
@@ -37,34 +36,27 @@ echo "[OK] All config + PXE files found."
 
 echo ""
 echo "=============================================="
-echo "[2] Installing required system packages..."
+echo "[2] Installing required packages..."
 echo "=============================================="
-
 sudo apt update -y
 sudo apt install -y \
     dnsmasq \
     nginx \
     wget \
-    debootstrap \
     squashfs-tools \
-    xz-utils \
-    xorriso \
-    curl \
-    ca-certificates \
-    systemd-container \
-    rsync
+    xorriso
 
 echo "[OK] Server build dependencies installed."
 
 
 echo ""
 echo "=============================================="
-echo "[3] Creating directory structure..."
+echo "[3] Creating directories..."
 echo "=============================================="
 sudo mkdir -p /srv/tftp
 sudo mkdir -p $TARGET_DIR
 sudo mkdir -p $IPXE_DIR
-sudo mkdir -p $DEBIAN_MOUNT
+sudo mkdir -p $LUBUNTU_MOUNT
 
 
 echo ""
@@ -78,7 +70,7 @@ sudo wget -O /srv/tftp/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
 sudo chmod 644 /srv/tftp/ipxe.efi
 sudo chmod 644 /srv/tftp/undionly.kpxe
 
-echo "[OK] iPXE bootloaders downloaded."
+echo "[OK] iPXE downloaded."
 
 
 echo ""
@@ -91,7 +83,7 @@ echo "[OK] boot.ipxe copied."
 
 echo ""
 echo "=============================================="
-echo "[6] Applying dnsmasq configuration..."
+echo "[6] Applying dnsmasq config..."
 echo "=============================================="
 sudo cp "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.conf
 sudo systemctl restart dnsmasq
@@ -99,117 +91,92 @@ sudo systemctl restart dnsmasq
 
 echo ""
 echo "=============================================="
-echo "[7] Fetching Debian LIVE ISO (cached)..."
+echo "[7] Fetching Lubuntu LIVE ISO..."
 echo "=============================================="
 
-if [ -f "$DEBIAN_ISO_PATH" ]; then
-    echo "[OK] Reusing cached ISO at $DEBIAN_ISO_PATH"
+if [ -f "$LUBUNTU_ISO_PATH" ]; then
+    echo "[OK] Using cached ISO at $LUBUNTU_ISO_PATH"
 else
-    echo "[*] Downloading Debian LIVE ISO..."
-    sudo wget -O "$DEBIAN_ISO_PATH" "$DEBIAN_ISO_URL"
+    echo "[*] Downloading Lubuntu LIVE ISO..."
+    sudo wget -O "$LUBUNTU_ISO_PATH" "$LUBUNTU_ISO_URL"
 fi
 
-sudo mount -o loop "$DEBIAN_ISO_PATH" "$DEBIAN_MOUNT"
+sudo mount -o loop "$LUBUNTU_ISO_PATH" "$LUBUNTU_MOUNT"
 echo "[OK] LIVE ISO mounted."
 
 
 echo ""
 echo "=============================================="
-echo "[8] Extracting live kernel + initrd..."
+echo "[8] Extracting kernel + initrd + squashfs..."
 echo "=============================================="
 
-# ✅ Live ISO stores these in /live/, NOT /install.amd/
-sudo cp "$DEBIAN_MOUNT/live/vmlinuz" "$TARGET_DIR/vmlinuz"
-sudo cp "$DEBIAN_MOUNT/live/initrd.img" "$TARGET_DIR/initrd.img"
+sudo cp "$LUBUNTU_MOUNT/casper/vmlinuz" "$TARGET_DIR/vmlinuz"
+sudo cp "$LUBUNTU_MOUNT/casper/initrd" "$TARGET_DIR/initrd"
+sudo cp "$LUBUNTU_MOUNT/casper/filesystem.squashfs" "$TARGET_DIR/filesystem.squashfs"
 
-sudo umount "$DEBIAN_MOUNT"
+sudo umount "$LUBUNTU_MOUNT"
 
-echo "[OK] Kernel + initrd extracted."
+echo "[OK] Lubuntu boot files extracted."
 
 
 echo ""
 echo "=============================================="
-echo "[9] Building Debian minimal rootfs..."
+echo "[9] Patch filesystem.squashfs (GUI → Chromium Kiosk)"
 echo "=============================================="
 
-ROOTFS="/tmp/debian-rootfs"
-sudo rm -rf "$ROOTFS"
-sudo mkdir -p "$ROOTFS"
+WORKDIR="/tmp/lubuntu-root"
+sudo rm -rf "$WORKDIR"
+sudo unsquashfs -d "$WORKDIR" "$TARGET_DIR/filesystem.squashfs"
 
-sudo debootstrap --variant=minbase stable "$ROOTFS" http://deb.debian.org/debian
+# REMOVE FULL DESKTOP (optional)
+sudo chroot "$WORKDIR" apt remove --purge -y lxqt* lubuntu-desktop
 
-echo "[OK] Base rootfs created."
+# INSTALL CHROMIUM + OPENBOX
+sudo chroot "$WORKDIR" apt install -y chromium-browser openbox xserver-xorg-legacy
 
-
-echo ""
-echo "=============================================="
-echo "[10] Installing Xorg, Openbox, Chromium..."
-echo "=============================================="
-
-sudo mount --bind /dev "$ROOTFS/dev"
-sudo mount --bind /proc "$ROOTFS/proc"
-sudo mount --bind /sys "$ROOTFS/sys"
-
-sudo cp /etc/resolv.conf "$ROOTFS/etc/"
-
-sudo chroot "$ROOTFS" /bin/bash <<EOF
-apt update
-apt install -y --no-install-recommends \
-    xorg openbox chromium fonts-dejavu
+# AUTOLOGIN
+mkdir -p "$WORKDIR/etc/systemd/system/getty@tty1.service.d"
+cat <<EOF | sudo tee "$WORKDIR/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin ubuntu --noclear %I \$TERM
 EOF
 
-sudo umount "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
-
-echo "[OK] GUI stack + browser installed."
-
-
-echo ""
-echo "=============================================="
-echo "[11] Adding Openbox kiosk autostart..."
-echo "=============================================="
-
-sudo mkdir -p "$ROOTFS/etc/skel/.config/openbox"
-
-cat <<EOF | sudo tee "$ROOTFS/etc/skel/.config/openbox/autostart"
-#!/bin/bash
-chromium --kiosk --noerrdialogs --incognito https://your-lms-url
+# OPENBOX AUTOSTART
+mkdir -p "$WORKDIR/home/ubuntu/.config/openbox"
+cat <<EOF | sudo tee "$WORKDIR/home/ubuntu/.config/openbox/autostart"
+chromium-browser --kiosk --noerrdialogs --incognito https://your-lms-url
 EOF
 
-sudo chmod +x "$ROOTFS/etc/skel/.config/openbox/autostart"
+sudo chmod +x "$WORKDIR/home/ubuntu/.config/openbox/autostart"
 
-echo "[OK] Kiosk launch script added."
+# .xinitrc
+echo "exec openbox-session" | sudo tee "$WORKDIR/home/ubuntu/.xinitrc"
 
-
-echo ""
-echo "=============================================="
-echo "[12] Building minimal.squashfs..."
-echo "=============================================="
-
-sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
-
-echo "[OK] squashfs built."
+echo "[OK] Chromium kiosk patched."
 
 
 echo ""
 echo "=============================================="
-echo "[13] Setting permissions..."
+echo "[10] Rebuilding filesystem.squashfs..."
 echo "=============================================="
+sudo mksquashfs "$WORKDIR" "$TARGET_DIR/filesystem.squashfs" -comp xz
+echo "[OK] squashfs rebuilt."
 
+
+echo ""
+echo "=============================================="
+echo "[11] Permissions..."
+echo "=============================================="
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
 
 echo ""
 echo "=============================================="
-echo "[14] Applying nginx configuration..."
+echo "[12] Apply nginx config + restart services..."
 echo "=============================================="
 sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
-
-
-echo ""
-echo "=============================================="
-echo "[15] Restarting services..."
-echo "=============================================="
 sudo systemctl restart nginx
 sudo systemctl restart dnsmasq
 
@@ -218,10 +185,10 @@ echo ""
 echo "=============================================="
 echo "            SETUP COMPLETE 🎉"
 echo "=============================================="
-echo "HTTP Server:  http://${SERVER_IP}:${HTTP_PORT}/"
-echo "PXE Script:   http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
-echo "Kernel:       $TARGET_DIR/vmlinuz"
-echo "Initrd:       $TARGET_DIR/initrd.img"
-echo "SquashFS:     $TARGET_DIR/minimal.squashfs"
+echo "PXE Boot:"
+echo "  Kernel:       $TARGET_DIR/vmlinuz"
+echo "  Initrd:       $TARGET_DIR/initrd"
+echo "  RootFS:       $TARGET_DIR/filesystem.squashfs"
+echo "iPXE Script:    http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
 echo ""
 
