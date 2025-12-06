@@ -1,0 +1,19 @@
+sudo apt update
+
+sudo apt install -y \
+    xorg \
+    xserver-xorg \
+    xserver-xorg-video-all \
+    xserver-xorg-input-all \
+    xinit \
+    x11-xserver-utils \
+    dbus-x11 \
+    xfonts-base \
+    openbox \
+    obconf \
+    chromium \
+    fonts-dejavu \
+    policykit-1 \
+    xdg-user-dirs \
+    xterm
+
