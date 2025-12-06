@@ -38,9 +38,22 @@ echo ""
 echo "=============================================="
 echo "[2] Installing required system packages..."
 echo "=============================================="
-sudo apt update -y
-sudo apt install -y dnsmasq nginx wget
 
+sudo apt update -y
+sudo apt install -y \
+    dnsmasq \
+    nginx \
+    wget \
+    debootstrap \
+    squashfs-tools \
+    xz-utils \
+    bsdtar \
+    curl \
+    ca-certificates \
+    systemd-container \
+    rsync
+
+echo "[OK] All server + build dependencies installed."
 
 echo ""
 echo "=============================================="
@@ -81,26 +94,93 @@ sudo systemctl restart dnsmasq
 
 echo ""
 echo "=============================================="
-echo "[7] Downloading Porteus ISO..."
+echo "[7] Downloading Debian ISO..."
 echo "=============================================="
-wget -O "$ISO_PATH" "$ISO_URL"
 
+DEBIAN_ISO_URL="https://saimei.ftp.acc.umu.se/debian-cd/current/amd64/iso-cd/debian-13.2.0-amd64-netinst.iso"
+DEBIAN_ISO_PATH="/tmp/debian.iso"
+DEBIAN_MOUNT="/mnt/debianiso"
+
+wget -O "$DEBIAN_ISO_PATH" "$DEBIAN_ISO_URL"
+sudo mkdir -p "$DEBIAN_MOUNT"
+sudo mount -o loop "$DEBIAN_ISO_PATH" "$DEBIAN_MOUNT"
+
+echo "[OK] Debian ISO downloaded + mounted."
 
 echo ""
 echo "=============================================="
-echo "[8] Extracting ISO contents..."
+echo "[8] Extracting Debian kernel + initrd..."
 echo "=============================================="
 
-sudo mkdir -p "$MOUNT_DIR"
-sudo mount -o loop "$ISO_PATH" "$MOUNT_DIR"
+# Debian netinst stores kernel/initrd inside install.amd/
+sudo cp "$DEBIAN_MOUNT/install.amd/vmlinuz" "$TARGET_DIR/vmlinuz"
+sudo cp "$DEBIAN_MOUNT/install.amd/initrd.gz" "$TARGET_DIR/initrd.gz"
 
-sudo cp "$MOUNT_DIR/boot/vmlinuz" "$TARGET_DIR/"
-sudo cp "$MOUNT_DIR/boot/initrd.xz" "$TARGET_DIR/"
+sudo umount "$DEBIAN_MOUNT"
+rm -f "$DEBIAN_ISO_PATH"
 
-sudo cp "$MOUNT_DIR/xzm/"*.xzm "$TARGET_DIR/base/"
+echo "[OK] Kernel + initrd extracted to $TARGET_DIR"
 
-sudo umount "$MOUNT_DIR"
-rm -f "$ISO_PATH"
+echo ""
+echo "=============================================="
+echo "[9] Building Debian minimal rootfs..."
+echo "=============================================="
+
+ROOTFS="/tmp/debian-rootfs"
+sudo rm -rf "$ROOTFS"
+sudo mkdir -p "$ROOTFS"
+
+sudo debootstrap --variant=minbase stable "$ROOTFS" http://deb.debian.org/debian
+
+echo "[OK] Base rootfs created."
+
+echo ""
+echo "=============================================="
+echo "[10] Installing Xorg, Openbox, Chromium..."
+echo "=============================================="
+
+sudo mount --bind /dev "$ROOTFS/dev"
+sudo mount --bind /proc "$ROOTFS/proc"
+sudo mount --bind /sys "$ROOTFS/sys"
+
+sudo cp /etc/resolv.conf "$ROOTFS/etc/"
+
+sudo chroot "$ROOTFS" /bin/bash <<EOF
+apt update
+apt install -y --no-install-recommends \
+    xorg openbox chromium fonts-dejavu
+EOF
+
+sudo umount "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
+
+echo "[OK] GUI stack + browser installed."
+
+echo ""
+echo "=============================================="
+echo "[11] Adding kiosk autostart..."
+echo "=============================================="
+
+sudo mkdir -p "$ROOTFS/etc/skel/.config/openbox"
+
+cat <<EOF | sudo tee "$ROOTFS/etc/skel/.config/openbox/autostart"
+#!/bin/bash
+chromium --kiosk --noerrdialogs --incognito https://your-lms-url-here
+EOF
+
+sudo chmod +x "$ROOTFS/etc/skel/.config/openbox/autostart"
+
+echo "[OK] Kiosk autostart configured."
+
+echo ""
+echo "=============================================="
+echo "[12] Creating minimal.squashfs..."
+echo "=============================================="
+
+sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
+
+echo "[OK] minimal.squashfs built at $TARGET_DIR/minimal.squashfs"
+
+
 
 echo ""
 echo "=============================================="
