@@ -117,7 +117,11 @@ echo "[9] Building Debian minimal rootfs..."
 echo "=============================================="
 
 ROOTFS="/tmp/debian-rootfs"
-sudo rm -rf "$ROOTFS"
+
+sudo umount -l "$ROOTFS/proc" || true
+sudo umount -l "$ROOTFS/sys" || true
+sudo umount -l "$ROOTFS/dev" || true
+
 sudo mkdir -p "$ROOTFS"
 
 sudo debootstrap --variant=minbase stable "$ROOTFS" http://deb.debian.org/debian

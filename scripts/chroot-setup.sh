@@ -5,6 +5,7 @@ echo "[CHROOT] Updating package lists..."
 apt update
 
 echo "[CHROOT] Installing GUI base + runtime dependencies..."
+
 apt install -y --no-install-recommends \
     xorg \
     xserver-xorg-core \
@@ -22,9 +23,9 @@ apt install -y --no-install-recommends \
     fonts-liberation \
     libnss3 \
     libatk1.0-0t64 \
-    libgdk-pixbuf-2.0-0t64 \
-    libgtk-3-0t64 \
-    libasound2t64 \
+    libgdk-pixbuf-2.0-0 \
+    libgtk-3-0 \
+    libasound2 \
     mesa-utils
 
 
