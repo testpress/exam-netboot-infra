@@ -1,12 +1,12 @@
 #!ipxe
+
 dhcp
+set base http://10.0.0.1:9000/debian
 
-set base http://10.0.0.1:9000/lubuntu
+echo Booting Debian Minimal PXE...
 
-echo Booting Lubuntu Live Kiosk...
-
-kernel ${base}/vmlinuz ip=dhcp boot=casper netboot=nfs fetch=${base}/filesystem.squashfs toram quiet splash ---
-initrd ${base}/initrd
+kernel ${base}/vmlinuz boot=live fetch=${base}/minimal.squashfs toram ip=dhcp
+initrd ${base}/initrd.gz
 
 boot
 

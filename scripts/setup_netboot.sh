@@ -4,12 +4,11 @@ set -e
 SERVER_IP="10.0.0.1"
 HTTP_PORT="9000"
 
-# ✅ Lubuntu 24.04.1 LTS LIVE ISO
-LUBUNTU_ISO_URL="https://cdimage.ubuntu.com/lubuntu/releases/questing/release/lubuntu-25.10-desktop-amd64.iso"
-LUBUNTU_ISO_PATH="/opt/lubuntu-live.iso"
-LUBUNTU_MOUNT="/mnt/lubuntu"
+DEBIAN_ISO_URL="https://saimei.ftp.acc.umu.se/debian-cd/current/amd64/iso-cd/debian-13.2.0-amd64-netinst.iso"
+DEBIAN_ISO_PATH="/opt/debian-netinst.iso"
+DEBIAN_MOUNT="/mnt/debianiso"
 
-TARGET_DIR="/var/www/html/lubuntu"
+TARGET_DIR="/var/www/html/debian"
 IPXE_DIR="/var/www/html/ipxe"
 
 CONFIG_DIR="../config"
@@ -31,32 +30,40 @@ for file in "${REQUIRED_FILES[@]}"; do
         exit 1
     fi
 done
-echo "[OK] All config + PXE files found."
+echo "[OK] All required files found."
 
 
 echo ""
 echo "=============================================="
-echo "[2] Installing required packages..."
+echo "[2] Installing required system packages..."
 echo "=============================================="
+
 sudo apt update -y
 sudo apt install -y \
     dnsmasq \
     nginx \
     wget \
+    debootstrap \
     squashfs-tools \
-    xorriso
+    xz-utils \
+    xorriso \
+    curl \
+    ca-certificates \
+    systemd-container \
+    rsync
 
-echo "[OK] Server build dependencies installed."
+echo "[OK] Server dependencies installed."
 
 
 echo ""
 echo "=============================================="
-echo "[3] Creating directories..."
+echo "[3] Creating directory structure..."
 echo "=============================================="
+
 sudo mkdir -p /srv/tftp
-sudo mkdir -p $TARGET_DIR
-sudo mkdir -p $IPXE_DIR
-sudo mkdir -p $LUBUNTU_MOUNT
+sudo mkdir -p "$TARGET_DIR"
+sudo mkdir -p "$IPXE_DIR"
+sudo mkdir -p "$DEBIAN_MOUNT"
 
 
 echo ""
@@ -69,21 +76,20 @@ sudo wget -O /srv/tftp/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
 
 sudo chmod 644 /srv/tftp/ipxe.efi
 sudo chmod 644 /srv/tftp/undionly.kpxe
-
-echo "[OK] iPXE downloaded."
+echo "[OK] Downloaded iPXE bootloaders."
 
 
 echo ""
 echo "=============================================="
 echo "[5] Copying boot.ipxe..."
 echo "=============================================="
-sudo cp "$PXE_DIR/boot.ipxe" $IPXE_DIR/
-echo "[OK] boot.ipxe copied."
+sudo cp "$PXE_DIR/boot.ipxe" "$IPXE_DIR/"
+echo "[OK] PXE script copied."
 
 
 echo ""
 echo "=============================================="
-echo "[6] Applying dnsmasq config..."
+echo "[6] Applying dnsmasq configuration..."
 echo "=============================================="
 sudo cp "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.conf
 sudo systemctl restart dnsmasq
@@ -91,92 +97,78 @@ sudo systemctl restart dnsmasq
 
 echo ""
 echo "=============================================="
-echo "[7] Fetching Lubuntu LIVE ISO..."
+echo "[7] Fetching Debian ISO (cached)..."
 echo "=============================================="
 
-if [ -f "$LUBUNTU_ISO_PATH" ]; then
-    echo "[OK] Using cached ISO at $LUBUNTU_ISO_PATH"
+if [ -f "$DEBIAN_ISO_PATH" ]; then
+    echo "[OK] Reusing cached ISO at $DEBIAN_ISO_PATH"
 else
-    echo "[*] Downloading Lubuntu LIVE ISO..."
-    sudo wget -O "$LUBUNTU_ISO_PATH" "$LUBUNTU_ISO_URL"
+    sudo wget -O "$DEBIAN_ISO_PATH" "$DEBIAN_ISO_URL"
 fi
 
-sudo mount -o loop "$LUBUNTU_ISO_PATH" "$LUBUNTU_MOUNT"
-echo "[OK] LIVE ISO mounted."
+sudo mount -o loop "$DEBIAN_ISO_PATH" "$DEBIAN_MOUNT"
+echo "[OK] ISO mounted."
 
 
 echo ""
 echo "=============================================="
-echo "[8] Extracting kernel + initrd + squashfs..."
+echo "[8] Extracting Debian kernel + initrd..."
 echo "=============================================="
 
-sudo cp "$LUBUNTU_MOUNT/casper/vmlinuz" "$TARGET_DIR/vmlinuz"
-sudo cp "$LUBUNTU_MOUNT/casper/initrd" "$TARGET_DIR/initrd"
-sudo cp "$LUBUNTU_MOUNT/casper/filesystem.squashfs" "$TARGET_DIR/filesystem.squashfs"
+sudo cp "$DEBIAN_MOUNT/install.amd/vmlinuz" "$TARGET_DIR/vmlinuz"
+sudo cp "$DEBIAN_MOUNT/install.amd/initrd.gz" "$TARGET_DIR/initrd.gz"
 
-sudo umount "$LUBUNTU_MOUNT"
+sudo umount "$DEBIAN_MOUNT"
 
-echo "[OK] Lubuntu boot files extracted."
+echo "[OK] Kernel + initrd extracted."
 
 
 echo ""
 echo "=============================================="
-echo "[9] Patch filesystem.squashfs (GUI → Chromium Kiosk)"
+echo "[9] Building minimal Debian rootfs..."
 echo "=============================================="
 
-WORKDIR="/tmp/lubuntu-root"
-sudo rm -rf "$WORKDIR"
-sudo unsquashfs -d "$WORKDIR" "$TARGET_DIR/filesystem.squashfs"
+ROOTFS="/tmp/debian-rootfs"
+sudo rm -rf "$ROOTFS"
+sudo mkdir -p "$ROOTFS"
 
-# REMOVE FULL DESKTOP (optional)
-sudo chroot "$WORKDIR" apt remove --purge -y lxqt* lubuntu-desktop
+sudo debootstrap --variant=minbase stable "$ROOTFS" http://deb.debian.org/debian
 
-# INSTALL CHROMIUM + OPENBOX
-sudo chroot "$WORKDIR" apt install -y chromium-browser openbox xserver-xorg-legacy
-
-# AUTOLOGIN
-mkdir -p "$WORKDIR/etc/systemd/system/getty@tty1.service.d"
-cat <<EOF | sudo tee "$WORKDIR/etc/systemd/system/getty@tty1.service.d/autologin.conf"
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin ubuntu --noclear %I \$TERM
-EOF
-
-# OPENBOX AUTOSTART
-mkdir -p "$WORKDIR/home/ubuntu/.config/openbox"
-cat <<EOF | sudo tee "$WORKDIR/home/ubuntu/.config/openbox/autostart"
-chromium-browser --kiosk --noerrdialogs --incognito https://your-lms-url
-EOF
-
-sudo chmod +x "$WORKDIR/home/ubuntu/.config/openbox/autostart"
-
-# .xinitrc
-echo "exec openbox-session" | sudo tee "$WORKDIR/home/ubuntu/.xinitrc"
-
-echo "[OK] Chromium kiosk patched."
+echo "[OK] Minimal Debian rootfs created."
 
 
 echo ""
 echo "=============================================="
-echo "[10] Rebuilding filesystem.squashfs..."
+echo "[10] Creating minimal.squashfs..."
 echo "=============================================="
-sudo mksquashfs "$WORKDIR" "$TARGET_DIR/filesystem.squashfs" -comp xz
-echo "[OK] squashfs rebuilt."
+
+sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
+
+echo "[OK] minimal.squashfs built."
 
 
 echo ""
 echo "=============================================="
-echo "[11] Permissions..."
+echo "[11] Setting permissions..."
 echo "=============================================="
+
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
 
 echo ""
 echo "=============================================="
-echo "[12] Apply nginx config + restart services..."
+echo "[12] Applying nginx configuration..."
 echo "=============================================="
+
 sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
+
+
+echo ""
+echo "=============================================="
+echo "[13] Restarting nginx + dnsmasq..."
+echo "=============================================="
+
 sudo systemctl restart nginx
 sudo systemctl restart dnsmasq
 
@@ -185,10 +177,12 @@ echo ""
 echo "=============================================="
 echo "            SETUP COMPLETE 🎉"
 echo "=============================================="
-echo "PXE Boot:"
-echo "  Kernel:       $TARGET_DIR/vmlinuz"
-echo "  Initrd:       $TARGET_DIR/initrd"
-echo "  RootFS:       $TARGET_DIR/filesystem.squashfs"
-echo "iPXE Script:    http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
+echo "HTTP Server:   http://${SERVER_IP}:${HTTP_PORT}/"
+echo "PXE Script:    http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
+echo "Kernel:        $TARGET_DIR/vmlinuz"
+echo "Initrd:        $TARGET_DIR/initrd.gz"
+echo "SquashFS:      $TARGET_DIR/minimal.squashfs"
+echo ""
+echo "Debian Minimal PXE boot environment is READY."
 echo ""
 
