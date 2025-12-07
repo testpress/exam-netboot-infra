@@ -5,28 +5,15 @@ SERVER_IP="10.0.0.1"
 HTTP_PORT="9000"
 
 # Lubuntu 26.04 ISO (cached)
-<<<<<<< Updated upstream
-LUBUNTU_ISO_URL="https://cdimage.ubuntu.com/lubuntu/releases/26.04/snapshot1/lubuntu-26.04-desktop-amd64.iso"
-LUBUNTU_ISO_PATH="/opt/lubuntu-26.04.iso"
-LUBUNTU_MOUNT="/mnt/lubuntuiso"
-
-# PXE directories
-=======
 ISO_URL="https://cdimage.ubuntu.com/lubuntu/releases/26.04/snapshot1/lubuntu-26.04-desktop-amd64.iso"
 ISO_PATH="/opt/lubuntu-26.04.iso"
 ISO_MOUNT="/mnt/lubuntuiso"
 
->>>>>>> Stashed changes
 TARGET_DIR="/var/www/html/lubuntu"
 IPXE_DIR="/var/www/html/ipxe"
 
-# Config directories
 CONFIG_DIR="../config"
 PXE_DIR="../pxe"
-
-# Build directory for rootfs (chroot)
-BUILD_DIR="$HOME/lubuntu"
-ROOTFS="$BUILD_DIR/rootfs"
 
 echo "=============================================="
 echo "[1] Validating config + PXE files..."
@@ -50,192 +37,126 @@ echo "[OK] All config files found."
 
 echo ""
 echo "=============================================="
-echo "[2] Installing required server packages..."
+echo "[2] Installing server dependencies..."
 echo "=============================================="
-
 sudo apt update -y
 sudo apt install -y \
     dnsmasq \
     nginx \
     wget \
-    debootstrap \
-    squashfs-tools \
-    xz-utils \
+    xorriso \
     curl \
     ca-certificates \
-    systemd-container \
     rsync
 
-echo "[OK] All dependencies installed."
+echo "[OK] Dependencies installed."
 
 
 echo ""
 echo "=============================================="
-echo "[3] Creating directory structure..."
+echo "[3] Preparing directories..."
 echo "=============================================="
-
 sudo mkdir -p /srv/tftp
-<<<<<<< Updated upstream
-sudo mkdir -p $TARGET_DIR
-sudo mkdir -p $IPXE_DIR
-sudo mkdir -p $LUBUNTU_MOUNT
-mkdir -p $BUILD_DIR
-=======
 sudo mkdir -p "$TARGET_DIR"
 sudo mkdir -p "$IPXE_DIR"
 sudo mkdir -p "$ISO_MOUNT"
->>>>>>> Stashed changes
 
-echo "[OK] Directory layout ready."
+echo "[OK] Directory structure ready."
 
 
 echo ""
 echo "=============================================="
 echo "[4] Downloading iPXE bootloaders..."
 echo "=============================================="
-
 sudo wget -O /srv/tftp/ipxe.efi https://boot.ipxe.org/ipxe.efi
 sudo wget -O /srv/tftp/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
+sudo chmod 644 /srv/tftp/ipxe.efi /srv/tftp/undionly.kpxe
 
-sudo chmod 644 /srv/tftp/ipxe.efi
-sudo chmod 644 /srv/tftp/undionly.kpxe
-
-echo "[OK] iPXE bootloaders installed."
+echo "[OK] iPXE bootloaders downloaded."
 
 
 echo ""
 echo "=============================================="
 echo "[5] Copying boot.ipxe..."
 echo "=============================================="
-
 sudo cp "$PXE_DIR/boot.ipxe" "$IPXE_DIR/"
 
-echo "[OK] boot.ipxe copied."
+echo "[OK] boot.ipxe placed."
 
 
 echo ""
 echo "=============================================="
 echo "[6] Applying dnsmasq configuration..."
 echo "=============================================="
-
 sudo cp "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.conf
 sudo systemctl restart dnsmasq
 
-echo "[OK] dnsmasq updated."
+echo "[OK] dnsmasq restarted."
 
 
 echo ""
 echo "=============================================="
-<<<<<<< Updated upstream
-echo "[7] Fetching Lubuntu 26.04 ISO (cached)..."
-echo "=============================================="
-
-if [ -f "$LUBUNTU_ISO_PATH" ]; then
-    echo "[OK] Using existing ISO: $LUBUNTU_ISO_PATH"
-=======
 echo "[7] Fetching Lubuntu ISO (cached)..."
 echo "=============================================="
 if [ -f "$ISO_PATH" ]; then
     echo "[OK] Using existing ISO: $ISO_PATH"
->>>>>>> Stashed changes
 else
-    echo "[*] Downloading Lubuntu ISO..."
-    sudo wget -O "$LUBUNTU_ISO_PATH" "$LUBUNTU_ISO_URL"
+    sudo wget -O "$ISO_PATH" "$ISO_URL"
 fi
 
-sudo mkdir -p "$LUBUNTU_MOUNT"
-sudo mount -o loop "$LUBUNTU_ISO_PATH" "$LUBUNTU_MOUNT"
+echo "[OK] ISO ready."
+
+
+echo ""
+echo "=============================================="
+echo "[8] Mounting ISO..."
+echo "=============================================="
+sudo mount -o loop "$ISO_PATH" "$ISO_MOUNT"
 
 echo "[OK] ISO mounted."
 
 
 echo ""
 echo "=============================================="
-echo "[8] Extracting kernel + initrd..."
+echo "[9] Extracting kernel + initrd + squashfs..."
 echo "=============================================="
-<<<<<<< Updated upstream
-=======
 
 sudo cp "$ISO_MOUNT/casper/vmlinuz" "$TARGET_DIR/vmlinuz"
 sudo cp "$ISO_MOUNT/casper/initrd" "$TARGET_DIR/initrd"
 sudo cp "$ISO_MOUNT/casper/filesystem.squashfs" "$TARGET_DIR/filesystem.squashfs"
->>>>>>> Stashed changes
 
-sudo cp "$LUBUNTU_MOUNT/casper/vmlinuz" "$TARGET_DIR/vmlinuz"
-sudo cp "$LUBUNTU_MOUNT/casper/initrd" "$TARGET_DIR/initrd"
-sudo cp "$LUBUNTU_MOUNT/casper/minimal.squashfs" "$TARGET_DIR/minimal.squashfs"
+sudo umount "$ISO_MOUNT"
 
-<<<<<<< Updated upstream
-sudo umount "$LUBUNTU_MOUNT"
-
-echo "[OK] Kernel + initrd extracted."
-
-#
-# echo ""
-# echo "=============================================="
-# echo "[9] Building minimal rootfs (stored in HOME)..."
-# echo "=============================================="
-#
-# sudo rm -rf "$ROOTFS"
-# mkdir -p "$ROOTFS"
-#
-# sudo debootstrap --variant=minbase noble "$ROOTFS" http://archive.ubuntu.com/ubuntu/
-#
-# echo "[OK] Minimal Lubuntu/Ubuntu rootfs created at $ROOTFS."
-#
-#
-# echo ""
-# echo "=============================================="
-# echo "[10] Creating minimal.squashfs..."
-# echo "=============================================="
-#
-# sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
-#
-# echo "[OK] minimal.squashfs created."
-=======
 echo "[OK] Kernel, initrd, filesystem.squashfs extracted."
->>>>>>> Stashed changes
 
 
 echo ""
 echo "=============================================="
-echo "[11] Setting file permissions..."
+echo "[10] Setting permissions..."
 echo "=============================================="
-
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
-echo "[OK] Permissions applied."
+echo "[OK] Permissions set."
 
 
 echo ""
 echo "=============================================="
-echo "[12] Applying nginx configuration..."
+echo "[11] Applying nginx config..."
 echo "=============================================="
-
 sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
 sudo systemctl restart nginx
 
-echo "[OK] nginx updated."
+echo "[OK] nginx restarted."
 
 
 echo ""
 echo "=============================================="
-<<<<<<< Updated upstream
-echo "        LUBUNTU PXE SETUP COMPLETE 🚀"
-echo "=============================================="
-echo "PXE Boot URL:  http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
-echo "Kernel:        $TARGET_DIR/vmlinuz"
-echo "Initrd:        $TARGET_DIR/initrd"
-echo "SquashFS:      $TARGET_DIR/minimal.squashfs"
-=======
 echo "         LUBUNTU PXE SETUP COMPLETE 🎯"
 echo "=============================================="
 echo "PXE Boot URL:     http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
 echo "Kernel:           $TARGET_DIR/vmlinuz"
 echo "Initrd:           $TARGET_DIR/initrd"
 echo "SquashFS:         $TARGET_DIR/filesystem.squashfs"
->>>>>>> Stashed changes
 echo ""
-echo "Boot now to validate minimal Lubuntu PXE load."
 
