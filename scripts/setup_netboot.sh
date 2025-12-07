@@ -4,7 +4,7 @@ set -e
 SERVER_IP="10.0.0.1"
 HTTP_PORT="9000"
 
-DEBIAN_ISO_URL="https://saimei.ftp.acc.umu.se/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.2.0-amd64-standard.iso"
+DEBIAN_ISO_URL="https://cdimage.debian.org/mirror/cdimage/archive/12.7.0-live/amd64/iso-hybrid/debian-live-12.7.0-amd64-standard.iso"
 DEBIAN_ISO_PATH="/opt/debian-live.iso"
 DEBIAN_MOUNT="/mnt/debianiso"
 
