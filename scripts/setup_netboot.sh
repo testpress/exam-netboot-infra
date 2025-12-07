@@ -4,7 +4,6 @@ set -e
 SERVER_IP="10.0.0.1"
 HTTP_PORT="9000"
 
-# ✅ USE THE LIVE ISO — NOT NETINST
 DEBIAN_ISO_URL="https://saimei.ftp.acc.umu.se/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.2.0-amd64-standard.iso"
 DEBIAN_ISO_PATH="/opt/debian-live.iso"
 DEBIAN_MOUNT="/mnt/debianiso"
@@ -14,6 +13,7 @@ IPXE_DIR="/var/www/html/ipxe"
 
 CONFIG_DIR="../config"
 PXE_DIR="../pxe"
+CHROOT_SETUP="./chroot-setup.sh"   # <— Your external script
 
 
 echo "=============================================="
@@ -24,6 +24,7 @@ REQUIRED_FILES=(
     "$CONFIG_DIR/dnsmasq.conf"
     "$CONFIG_DIR/nginx.conf"
     "$PXE_DIR/boot.ipxe"
+    "$CHROOT_SETUP"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -32,14 +33,12 @@ for file in "${REQUIRED_FILES[@]}"; do
         exit 1
     fi
 done
-echo "[OK] All config + PXE files found."
 
 
 echo ""
 echo "=============================================="
-echo "[2] Installing required system packages..."
+echo "[2] Installing server packages..."
 echo "=============================================="
-
 sudo apt update -y
 sudo apt install -y \
     dnsmasq \
@@ -53,8 +52,6 @@ sudo apt install -y \
     ca-certificates \
     systemd-container \
     rsync
-
-echo "[OK] Server build dependencies installed."
 
 
 echo ""
@@ -71,14 +68,9 @@ echo ""
 echo "=============================================="
 echo "[4] Downloading iPXE bootloaders..."
 echo "=============================================="
-
 sudo wget -O /srv/tftp/ipxe.efi https://boot.ipxe.org/ipxe.efi
 sudo wget -O /srv/tftp/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
-
-sudo chmod 644 /srv/tftp/ipxe.efi
-sudo chmod 644 /srv/tftp/undionly.kpxe
-
-echo "[OK] iPXE bootloaders downloaded."
+sudo chmod 644 /srv/tftp/*
 
 
 echo ""
@@ -86,12 +78,11 @@ echo "=============================================="
 echo "[5] Copying boot.ipxe..."
 echo "=============================================="
 sudo cp "$PXE_DIR/boot.ipxe" $IPXE_DIR/
-echo "[OK] boot.ipxe copied."
 
 
 echo ""
 echo "=============================================="
-echo "[6] Applying dnsmasq configuration..."
+echo "[6] Applying dnsmasq config..."
 echo "=============================================="
 sudo cp "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.conf
 sudo systemctl restart dnsmasq
@@ -103,28 +94,21 @@ echo "[7] Fetching Debian LIVE ISO (cached)..."
 echo "=============================================="
 
 if [ -f "$DEBIAN_ISO_PATH" ]; then
-    echo "[OK] Reusing cached ISO at $DEBIAN_ISO_PATH"
+    echo "[OK] Reusing cached ISO"
 else
-    echo "[*] Downloading Debian LIVE ISO..."
     sudo wget -O "$DEBIAN_ISO_PATH" "$DEBIAN_ISO_URL"
 fi
 
 sudo mount -o loop "$DEBIAN_ISO_PATH" "$DEBIAN_MOUNT"
-echo "[OK] LIVE ISO mounted."
 
 
 echo ""
 echo "=============================================="
 echo "[8] Extracting live kernel + initrd..."
 echo "=============================================="
-
-# ✅ Live ISO stores these in /live/, NOT /install.amd/
 sudo cp "$DEBIAN_MOUNT/live/vmlinuz" "$TARGET_DIR/vmlinuz"
 sudo cp "$DEBIAN_MOUNT/live/initrd.img" "$TARGET_DIR/initrd.img"
-
 sudo umount "$DEBIAN_MOUNT"
-
-echo "[OK] Kernel + initrd extracted."
 
 
 echo ""
@@ -138,90 +122,54 @@ sudo mkdir -p "$ROOTFS"
 
 sudo debootstrap --variant=minbase stable "$ROOTFS" http://deb.debian.org/debian
 
-echo "[OK] Base rootfs created."
-
 
 echo ""
 echo "=============================================="
-echo "[10] Installing Xorg, Openbox, Chromium..."
+echo "[10] Running GUI + kiosk setup in chroot..."
 echo "=============================================="
 
 sudo mount --bind /dev "$ROOTFS/dev"
 sudo mount --bind /proc "$ROOTFS/proc"
 sudo mount --bind /sys "$ROOTFS/sys"
-
 sudo cp /etc/resolv.conf "$ROOTFS/etc/"
 
-sudo chroot "$ROOTFS" /bin/bash <<EOF
-apt update
-apt install -y --no-install-recommends \
-    xorg openbox chromium fonts-dejavu
-EOF
+sudo cp "$CHROOT_SETUP" "$ROOTFS/root/chroot-setup.sh"
+sudo chmod +x "$ROOTFS/root/chroot-setup.sh"
+
+sudo chroot "$ROOTFS" /bin/bash /root/chroot-setup.sh
 
 sudo umount "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
 
-echo "[OK] GUI stack + browser installed."
-
 
 echo ""
 echo "=============================================="
-echo "[11] Adding Openbox kiosk autostart..."
+echo "[11] Creating minimal.squashfs..."
 echo "=============================================="
-
-sudo mkdir -p "$ROOTFS/etc/skel/.config/openbox"
-
-cat <<EOF | sudo tee "$ROOTFS/etc/skel/.config/openbox/autostart"
-#!/bin/bash
-chromium --kiosk --noerrdialogs --incognito https://your-lms-url
-EOF
-
-sudo chmod +x "$ROOTFS/etc/skel/.config/openbox/autostart"
-
-echo "[OK] Kiosk launch script added."
-
-
-echo ""
-echo "=============================================="
-echo "[12] Building minimal.squashfs..."
-echo "=============================================="
-
 sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
 
-echo "[OK] squashfs built."
-
 
 echo ""
 echo "=============================================="
-echo "[13] Setting permissions..."
+echo "[12] Setting permissions..."
 echo "=============================================="
-
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
 
 echo ""
 echo "=============================================="
-echo "[14] Applying nginx configuration..."
+echo "[13] Applying nginx configuration..."
 echo "=============================================="
 sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
-
-
-echo ""
-echo "=============================================="
-echo "[15] Restarting services..."
-echo "=============================================="
 sudo systemctl restart nginx
-sudo systemctl restart dnsmasq
 
 
 echo ""
 echo "=============================================="
-echo "            SETUP COMPLETE 🎉"
+echo "        SETUP COMPLETE 🚀"
 echo "=============================================="
-echo "HTTP Server:  http://${SERVER_IP}:${HTTP_PORT}/"
-echo "PXE Script:   http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
+echo "PXE Boot:     http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
 echo "Kernel:       $TARGET_DIR/vmlinuz"
 echo "Initrd:       $TARGET_DIR/initrd.img"
 echo "SquashFS:     $TARGET_DIR/minimal.squashfs"
-echo ""
 
