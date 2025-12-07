@@ -1,12 +1,11 @@
 #!ipxe
 
 dhcp
-set base http://10.0.0.1:9000/debian
+set base http://10.0.0.1:9000/lubuntu
 
-echo Booting Debian Minimal PXE...
+echo Booting Lubuntu 26.04 Minimal...
 
-kernel ${base}/vmlinuz boot=live fetch=${base}/minimal.squashfs toram ip=dhcp
-initrd ${base}/initrd.gz
-
+kernel ${base}/vmlinuz boot=casper toram fetch=${base}/minimal.squashfs
+initrd ${base}/initrd
 boot
 
