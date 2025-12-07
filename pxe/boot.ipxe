@@ -3,9 +3,15 @@
 dhcp
 set base http://10.0.0.1:9000/lubuntu
 
+<<<<<<< Updated upstream
 echo Booting Lubuntu 26.04 Minimal...
 
 kernel ${base}/vmlinuz boot=casper toram url=${base}/minimal.squashfs
+=======
+echo Booting Lubuntu 26.04 Live...
+
+kernel ${base}/vmlinuz boot=casper url=${base}/filesystem.squashfs toram ip=dhcp
+>>>>>>> Stashed changes
 initrd ${base}/initrd
 boot
 
