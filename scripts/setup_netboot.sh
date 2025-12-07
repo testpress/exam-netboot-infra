@@ -1,162 +1,127 @@
 #!/bin/bash
 set -e
 
-SERVER_IP="10.0.0.1"
-HTTP_PORT="9000"
+PXE_IP="192.168.1.160"
+NET_RANGE="192.168.1.0/24"
+IFACE="enp0s31f6"
+ISO_PATH="ubuntu-24.04.3-desktop-amd64.iso"
 
-# Lubuntu 26.04 ISO (cached)
-ISO_URL="https://cdimage.ubuntu.com/lubuntu/releases/26.04/snapshot1/lubuntu-26.04-desktop-amd64.iso"
-ISO_PATH="/opt/lubuntu-26.04.iso"
-ISO_MOUNT="/mnt/lubuntuiso"
-
-TARGET_DIR="/var/www/html/lubuntu"
-IPXE_DIR="/var/www/html/ipxe"
-
-CONFIG_DIR="../config"
-PXE_DIR="../pxe"
-
-echo "=============================================="
-echo "[1] Validating config + PXE files..."
-echo "=============================================="
-
-REQUIRED_FILES=(
-    "$CONFIG_DIR/dnsmasq.conf"
-    "$CONFIG_DIR/nginx.conf"
-    "$PXE_DIR/boot.ipxe"
-)
-
-for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -f "$file" ]; then
-        echo "[ERROR] Missing file: $file"
-        exit 1
-    fi
-done
-
-echo "[OK] All config files found."
-
-
-echo ""
-echo "=============================================="
-echo "[2] Installing server dependencies..."
-echo "=============================================="
-sudo apt update -y
+echo "=== STEP 1: Installing Packages ==="
+sudo apt update
 sudo apt install -y \
+    apache2 \
+    nfs-kernel-server \
     dnsmasq \
-    nginx \
-    wget \
-    xorriso \
-    curl \
-    ca-certificates \
-    rsync
+    unzip \
+    wget
 
-echo "[OK] Dependencies installed."
+echo "=== STEP 2: Preparing Directories ==="
+sudo mkdir -p /var/lib/tftpboot/{bios,boot/casper,grub}
+sudo mkdir -p /var/www/html/desktop/u2404
 
+echo "=== STEP 3: Downloading PXELINUX (BIOS) ==="
+cd ~/Downloads
+wget -nc https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.zip
+unzip -o syslinux-6.03.zip
 
-echo ""
-echo "=============================================="
-echo "[3] Preparing directories..."
-echo "=============================================="
-sudo mkdir -p /srv/tftp
-sudo mkdir -p "$TARGET_DIR"
-sudo mkdir -p "$IPXE_DIR"
-sudo mkdir -p "$ISO_MOUNT"
+echo "=== STEP 4: Installing PXELINUX Files ==="
+sudo cp bios/com32/elflink/ldlinux/ldlinux.c32 /var/lib/tftpboot/bios/
+sudo cp bios/com32/libutil/libutil.c32 /var/lib/tftpboot/bios/
+sudo cp bios/com32/menu/menu.c32 /var/lib/tftpboot/bios/
+sudo cp bios/com32/menu/vesamenu.c32 /var/lib/tftpboot/bios/
+sudo cp bios/core/pxelinux.0 /var/lib/tftpboot/bios/
+sudo cp bios/core/lpxelinux.0 /var/lib/tftpboot/bios/
 
-echo "[OK] Directory structure ready."
+echo "=== STEP 5: Installing UEFI GRUB Files ==="
+wget -nc https://mirrors.kernel.org/ubuntu/pool/main/s/shim-signed/shim-signed_1.58+15.8-0ubuntu1_amd64.deb
+wget -nc https://mirrors.kernel.org/ubuntu/pool/main/g/grub2/grub-efi-amd64-signed_1.202.5+2.12-1ubuntu7.3_amd64.deb
 
+dpkg -x shim-signed_*.deb shim
+dpkg -x grub-efi-amd64-signed_*.deb grub
 
-echo ""
-echo "=============================================="
-echo "[4] Downloading iPXE bootloaders..."
-echo "=============================================="
-sudo wget -O /srv/tftp/ipxe.efi https://boot.ipxe.org/ipxe.efi
-sudo wget -O /srv/tftp/undionly.kpxe https://boot.ipxe.org/undionly.kpxe
-sudo chmod 644 /srv/tftp/ipxe.efi /srv/tftp/undionly.kpxe
+sudo cp grub/usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed /var/lib/tftpboot/grub/grubx64.efi
+sudo cp shim/usr/lib/shim/shimx64.efi.signed /var/lib/tftpboot/grub/bootx64.efi
 
-echo "[OK] iPXE bootloaders downloaded."
+echo "=== STEP 6: Mounting ISO ==="
+sudo mount -o loop "$ISO_PATH" /media
 
+echo "=== STEP 7: Copying ISO Contents to Webroot ==="
+sudo cp -rf /media/* /var/www/html/desktop/u2404
+sudo cp -rf /media/.disk /var/www/html/desktop/u2404
 
-echo ""
-echo "=============================================="
-echo "[5] Copying boot.ipxe..."
-echo "=============================================="
-sudo cp "$PXE_DIR/boot.ipxe" "$IPXE_DIR/"
+echo "=== STEP 8: Copying Kernel + Initrd for TFTP ==="
+sudo cp /var/www/html/desktop/u2404/casper/vmlinuz /var/lib/tftpboot/boot/casper/
+sudo cp /var/www/html/desktop/u2404/casper/initrd /var/lib/tftpboot/boot/casper/
 
-echo "[OK] boot.ipxe placed."
+sudo umount /media
 
+echo "=== STEP 9: Create Symlink for BIOS Boot ==="
+sudo ln -sf /var/lib/tftpboot/boot /var/lib/tftpboot/bios/boot
 
-echo ""
-echo "=============================================="
-echo "[6] Applying dnsmasq configuration..."
-echo "=============================================="
-sudo cp "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.conf
+echo "=== STEP 10: Configure NFS ==="
+echo "/var/www/html/desktop $NET_RANGE(ro)" | sudo tee /etc/exports
+sudo exportfs -ra
+
+echo "=== STEP 11: Configure dnsmasq ==="
+sudo bash -c "cat >/etc/dnsmasq.d/pxe.conf" <<EOF
+interface=${IFACE}
+bind-interfaces
+
+dhcp-range=192.168.1.170,192.168.1.200,12h
+
+dhcp-match=set:efi64,option:client-arch,7
+dhcp-boot=tag:efi64,grub/bootx64.efi
+dhcp-boot=/bios/pxelinux.0
+
+enable-tftp
+tftp-root=/var/lib/tftpboot
+
+dhcp-option=3,192.168.1.1
+dhcp-option=6,192.168.1.1
+
+log-dhcp
+log-queries
+log-facility=/var/log/dnsmasq.log
+EOF
+
 sudo systemctl restart dnsmasq
 
-echo "[OK] dnsmasq restarted."
+echo "=== STEP 12: PXELinux BIOS Menu ==="
+sudo mkdir -p /var/lib/tftpboot/bios/pxelinux.cfg
+sudo bash -c "cat >/var/lib/tftpboot/bios/pxelinux.cfg/default" <<EOF
+DEFAULT menu.c32
+MENU TITLE Ubuntu PXE Boot Menu
 
+LABEL Ubuntu Desktop 24.04
+    MENU LABEL Ubuntu Desktop 24.04
+    KERNEL /boot/casper/vmlinuz
+    APPEND initrd=/boot/casper/initrd boot=casper ip=dhcp netboot=nfs nfsroot=${PXE_IP}:/var/www/html/desktop/u2404
+EOF
 
-echo ""
-echo "=============================================="
-echo "[7] Fetching Lubuntu ISO (cached)..."
-echo "=============================================="
-if [ -f "$ISO_PATH" ]; then
-    echo "[OK] Using existing ISO: $ISO_PATH"
-else
-    sudo wget -O "$ISO_PATH" "$ISO_URL"
+echo "=== STEP 13: GRUB EFI Menu ==="
+sudo bash -c "cat >/var/lib/tftpboot/grub/grub.cfg" <<EOF
+if loadfont /grub/font.pf2 ; then
+    set gfxmode=auto
+    insmod efi_gop
+    insmod gfxterm
+    terminal_output gfxterm
 fi
 
-echo "[OK] ISO ready."
+set timeout=5
 
+menuentry "Ubuntu Desktop 24.04" {
+    linux /boot/casper/vmlinuz boot=casper ip=dhcp netboot=nfs nfsroot=${PXE_IP}:/var/www/html/desktop/u2404
+    initrd /boot/casper/initrd
+}
+EOF
 
-echo ""
-echo "=============================================="
-echo "[8] Mounting ISO..."
-echo "=============================================="
-sudo mount -o loop "$ISO_PATH" "$ISO_MOUNT"
+echo "=== STEP 14: Restart Services ==="
+sudo systemctl restart apache2
+sudo systemctl restart nfs-kernel-server
+sudo systemctl restart dnsmasq
 
-echo "[OK] ISO mounted."
-
-
-echo ""
-echo "=============================================="
-echo "[9] Extracting kernel + initrd + squashfs..."
-echo "=============================================="
-
-sudo cp "$ISO_MOUNT/casper/vmlinuz" "$TARGET_DIR/vmlinuz"
-sudo cp "$ISO_MOUNT/casper/initrd" "$TARGET_DIR/initrd"
-sudo cp "$ISO_MOUNT/casper/filesystem.squashfs" "$TARGET_DIR/filesystem.squashfs"
-
-sudo umount "$ISO_MOUNT"
-
-echo "[OK] Kernel, initrd, filesystem.squashfs extracted."
-
-
-echo ""
-echo "=============================================="
-echo "[10] Setting permissions..."
-echo "=============================================="
-sudo chown -R www-data:www-data /var/www/html
-sudo chmod -R 755 /var/www/html
-
-echo "[OK] Permissions set."
-
-
-echo ""
-echo "=============================================="
-echo "[11] Applying nginx config..."
-echo "=============================================="
-sudo cp "$CONFIG_DIR/nginx.conf" /etc/nginx/sites-available/default
-sudo systemctl restart nginx
-
-echo "[OK] nginx restarted."
-
-
-echo ""
-echo "=============================================="
-echo "         LUBUNTU PXE SETUP COMPLETE 🎯"
-echo "=============================================="
-echo "PXE Boot URL:     http://${SERVER_IP}:${HTTP_PORT}/ipxe/boot.ipxe"
-echo "Kernel:           $TARGET_DIR/vmlinuz"
-echo "Initrd:           $TARGET_DIR/initrd"
-echo "SquashFS:         $TARGET_DIR/filesystem.squashfs"
-echo ""
+echo "=== PXE SERVER READY ==="
+echo "BIOS PXE → pxelinux.0"
+echo "UEFI PXE → grub/bootx64.efi"
+echo "Serving Ubuntu 24.04 Desktop"
 
