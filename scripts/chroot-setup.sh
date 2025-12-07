@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "[CHROOT] Fixing apt sources..."
+echo "[CHROOT] Fixing apt sources (Debian 13 stable)..."
 cat <<EOF >/etc/apt/sources.list
 deb http://deb.debian.org/debian stable main contrib non-free-firmware
 deb http://security.debian.org/debian-security stable-security main contrib non-free-firmware
@@ -9,13 +9,13 @@ deb http://deb.debian.org/debian stable-updates main contrib non-free-firmware
 EOF
 
 
-echo "[CHROOT] Updating packages..."
-apt update
+echo "[CHROOT] Updating package index..."
+apt update || (echo "APT FAILED — DNS or sources not working" && exit 1)
 
 
-echo "[CHROOT] Installing GUI, Xorg, input drivers, browser, WiFi..."
+echo "[CHROOT] Installing core GUI stack, input, WiFi, browser..."
 apt install -y --no-install-recommends \
-    # Xorg core & input
+    # Xorg minimal core + input
     xserver-xorg-core \
     xserver-xorg-input-all \
     xserver-xorg-input-libinput \
@@ -23,14 +23,14 @@ apt install -y --no-install-recommends \
     xinit \
     xinput \
     udev \
-    # Desktop environment & session
+    # Desktop
     openbox \
     lightdm \
     lightdm-gtk-greeter \
     dbus-x11 \
     # Browser
     chromium \
-    # Network
+    # Networking
     wpasupplicant \
     wireless-tools \
     systemd \
@@ -44,15 +44,13 @@ apt install -y --no-install-recommends \
     libgtk-3-0 \
     libasound2 \
     libnss3 \
-    # Misc
+    # Graphics util
     mesa-utils
 
 
-echo "[CHROOT] Enabling system services..."
+echo "[CHROOT] Enabling required system services..."
 systemctl enable systemd-networkd.service
 systemctl enable systemd-resolved.service
-systemctl enable systemd-udevd.service
-systemctl enable systemd-udev-trigger.service
 
 
 echo "[CHROOT] Creating WiFi configuration..."
@@ -65,14 +63,13 @@ network={
     ssid="Testpress_5G"
     psk="Tp12345"
     key_mgmt=WPA-PSK
-    priority=1
 }
 EOF
 
 chmod 600 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 
 
-echo "[CHROOT] Creating systemd-networkd config..."
+echo "[CHROOT] Adding systemd-networkd WLAN config..."
 mkdir -p /etc/systemd/network
 
 cat <<EOF >/etc/systemd/network/20-wlan0.network
@@ -84,7 +81,7 @@ DHCP=yes
 EOF
 
 
-echo "[CHROOT] Creating user..."
+echo "[CHROOT] Creating kiosk user..."
 useradd -m -s /bin/bash user
 echo "user:user" | chpasswd
 
@@ -103,7 +100,6 @@ EOF
 echo "[CHROOT] Creating Openbox config..."
 mkdir -p /home/user/.config/openbox
 
-# Minimal rc.xml
 cat <<EOF >/home/user/.config/openbox/rc.xml
 <?xml version="1.0" encoding="UTF-8"?>
 <openbox_config>
@@ -111,7 +107,6 @@ cat <<EOF >/home/user/.config/openbox/rc.xml
 </openbox_config>
 EOF
 
-# Disable right-click
 echo "<openbox_menu></openbox_menu>" > /home/user/.config/openbox/menu.xml
 
 
@@ -123,11 +118,11 @@ EOF
 chmod +x /home/user/.xinitrc
 
 
-echo "[CHROOT] Creating Openbox autostart..."
+echo "[CHROOT] Creating Openbox autostart script..."
 cat <<EOF >/home/user/.config/openbox/autostart
 #!/bin/bash
 
-# Ensure WiFi starts
+# Connect WiFi
 wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
 
 # Disable screen blanking
@@ -135,7 +130,7 @@ xset s off
 xset -dpms
 xset s noblank
 
-# Launch Chromium normally
+# Launch Chromium (normal mode)
 chromium https://lmsdemo.testpress.in &
 EOF
 
@@ -144,5 +139,5 @@ chown -R user:user /home/user/.config
 chown user:user /home/user/.xinitrc
 
 
-echo "[CHROOT] Setup complete: GUI + WiFi + Chromium running."
+echo "[CHROOT] Done: Full GUI, WiFi, Chromium setup completed successfully."
 
