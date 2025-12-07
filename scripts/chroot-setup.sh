@@ -15,17 +15,17 @@ apt install -y --no-install-recommends \
     lightdm \
     lightdm-gtk-greeter \
     dbus-x11 \
-    policykit-1 \
+    polkitd \
+    pkexec \
     chromium \
     fonts-dejavu \
     fonts-liberation \
     libnss3 \
-    libatk1.0-0 \
-    libgdk-pixbuf-2.0-0 \
-    libgtk-3-0 \
-    libasound2 \
-    mesa-utils \
-    mesa-utils-extra
+    libatk1.0-0t64 \
+    libgdk-pixbuf-2.0-0t64 \
+    libgtk-3-0t64 \
+    libasound2t64 \
+    mesa-utils
 
 
 echo "[CHROOT] Creating kiosk user..."
