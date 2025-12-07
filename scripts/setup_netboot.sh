@@ -136,33 +136,34 @@ echo "=============================================="
 
 sudo cp "$LUBUNTU_MOUNT/casper/vmlinuz" "$TARGET_DIR/vmlinuz"
 sudo cp "$LUBUNTU_MOUNT/casper/initrd" "$TARGET_DIR/initrd"
+sudo cp "$LUBUNTU_MOUNT/casper/minimal.squashfs" "$TARGET_DIR/minimal.squashfs"
 
 sudo umount "$LUBUNTU_MOUNT"
 
 echo "[OK] Kernel + initrd extracted."
 
-
-echo ""
-echo "=============================================="
-echo "[9] Building minimal rootfs (stored in HOME)..."
-echo "=============================================="
-
-sudo rm -rf "$ROOTFS"
-mkdir -p "$ROOTFS"
-
-sudo debootstrap --variant=minbase noble "$ROOTFS" http://archive.ubuntu.com/ubuntu/
-
-echo "[OK] Minimal Lubuntu/Ubuntu rootfs created at $ROOTFS."
-
-
-echo ""
-echo "=============================================="
-echo "[10] Creating minimal.squashfs..."
-echo "=============================================="
-
-sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
-
-echo "[OK] minimal.squashfs created."
+#
+# echo ""
+# echo "=============================================="
+# echo "[9] Building minimal rootfs (stored in HOME)..."
+# echo "=============================================="
+#
+# sudo rm -rf "$ROOTFS"
+# mkdir -p "$ROOTFS"
+#
+# sudo debootstrap --variant=minbase noble "$ROOTFS" http://archive.ubuntu.com/ubuntu/
+#
+# echo "[OK] Minimal Lubuntu/Ubuntu rootfs created at $ROOTFS."
+#
+#
+# echo ""
+# echo "=============================================="
+# echo "[10] Creating minimal.squashfs..."
+# echo "=============================================="
+#
+# sudo mksquashfs "$ROOTFS" "$TARGET_DIR/minimal.squashfs" -comp xz -e boot
+#
+# echo "[OK] minimal.squashfs created."
 
 
 echo ""

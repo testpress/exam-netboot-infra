@@ -5,7 +5,7 @@ set base http://10.0.0.1:9000/lubuntu
 
 echo Booting Lubuntu 26.04 Minimal...
 
-kernel ${base}/vmlinuz boot=casper toram fetch=${base}/minimal.squashfs
+kernel ${base}/vmlinuz boot=casper toram url=${base}/minimal.squashfs
 initrd ${base}/initrd
 boot
 
