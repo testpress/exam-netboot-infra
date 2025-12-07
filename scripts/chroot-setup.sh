@@ -6,6 +6,13 @@ apt update
 
 echo "[CHROOT] Installing GUI base + input stack + runtime dependencies..."
 
+# Fix sources
+cat <<EOF >/etc/apt/sources.list
+deb http://deb.debian.org/debian stable main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security stable-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian stable-updates main contrib non-free non-free-firmware
+EOF
+
 apt install -y --no-install-recommends \
     # Xorg Core + Drivers
     xorg \
