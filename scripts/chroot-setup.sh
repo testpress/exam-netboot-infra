@@ -1,84 +1,90 @@
 #!/bin/bash
 set -e
 
-echo "[CHROOT] Fixing apt sources (Debian 13 stable)..."
+echo "[CHROOT] Fixing apt sources (Debian 12 stable)..."
 cat <<EOF >/etc/apt/sources.list
-deb http://deb.debian.org/debian stable main contrib non-free-firmware
-deb http://security.debian.org/debian-security stable-security main contrib non-free-firmware
-deb http://deb.debian.org/debian stable-updates main contrib non-free-firmware
+deb http://deb.debian.org/debian bookworm main contrib non-free-firmware
+deb http://security.debian.org/debian-security bookworm-security main contrib non-free-firmware
+deb http://deb.debian.org/debian bookworm-updates main contrib non-free-firmware
 EOF
 
-
 echo "[CHROOT] Updating package index..."
-apt update || (echo "APT FAILED — DNS or sources not working" && exit 1)
+apt update || exit 1
 
 
-echo "[CHROOT] Installing core GUI stack, input, WiFi, browser..."
+echo "[CHROOT] Installing LXDE desktop + input stack + WiFi + browser..."
+
 apt install -y --no-install-recommends \
-    # Xorg minimal core + input
+    # LXDE Desktop Environment
+    lxde-core \
+    lxsession \
+    lxterminal \
+    lxinput \
+    # Xorg + input
     xserver-xorg-core \
     xserver-xorg-input-all \
     xserver-xorg-input-libinput \
     xserver-xorg-video-fbdev \
     xinit \
-    xinput \
     udev \
-    # Desktop
-    openbox \
+    # Display manager
     lightdm \
     lightdm-gtk-greeter \
     dbus-x11 \
     # Browser
     chromium \
-    # Networking
+    # WiFi
     wpasupplicant \
     wireless-tools \
-    systemd \
-    dbus \
+    network-manager \
     # Fonts
     fonts-dejavu \
     fonts-liberation \
     # Browser deps
-    libatk1.0-0t64 \
-    libgdk-pixbuf-2.0-0 \
     libgtk-3-0 \
-    libasound2 \
     libnss3 \
-    # Graphics util
+    libasound2 \
+    libgdk-pixbuf-2.0-0 \
+    libatk1.0-0 \
+    # Graphics utilities
     mesa-utils
 
+echo "[CHROOT] Packages installed."
 
-echo "[CHROOT] Enabling required system services..."
-systemctl enable systemd-networkd.service
-systemctl enable systemd-resolved.service
+
+echo "[CHROOT] Enabling services (LightDM + NetworkManager + udev)..."
+systemctl enable lightdm
+systemctl enable NetworkManager
+systemctl enable systemd-udevd
+systemctl enable dbus
 
 
 echo "[CHROOT] Creating WiFi configuration..."
-mkdir -p /etc/wpa_supplicant
+mkdir -p /etc/NetworkManager/system-connections
 
-cat <<EOF >/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-ctrl_interface=/run/wpa_supplicant
+cat <<EOF >/etc/NetworkManager/system-connections/Testpress_5G.nmconnection
+[connection]
+id=Testpress_5G
+uuid=$(uuidgen)
+type=wifi
+autoconnect=true
 
-network={
-    ssid="Testpress_5G"
-    psk="Tp12345"
-    key_mgmt=WPA-PSK
-}
+[wifi]
+ssid=Testpress_5G
+mode=infrastructure
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=Tp12345
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=ignore
 EOF
 
-chmod 600 /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-
-
-echo "[CHROOT] Adding systemd-networkd WLAN config..."
-mkdir -p /etc/systemd/network
-
-cat <<EOF >/etc/systemd/network/20-wlan0.network
-[Match]
-Name=wlan0
-
-[Network]
-DHCP=yes
-EOF
+chmod 600 /etc/NetworkManager/system-connections/Testpress_5G.nmconnection
 
 
 echo "[CHROOT] Creating kiosk user..."
@@ -86,58 +92,35 @@ useradd -m -s /bin/bash user
 echo "user:user" | chpasswd
 
 
-echo "[CHROOT] Configuring LightDM autologin..."
+echo "[CHROOT] Setting LightDM autologin to LXDE..."
 mkdir -p /etc/lightdm/lightdm.conf.d
 
 cat <<EOF >/etc/lightdm/lightdm.conf.d/50-autologin.conf
 [Seat:*]
 autologin-user=user
-user-session=openbox
+autologin-session=LXDE
 autologin-user-timeout=0
 EOF
 
 
-echo "[CHROOT] Creating Openbox config..."
-mkdir -p /home/user/.config/openbox
+echo "[CHROOT] Creating LXDE autostart..."
+mkdir -p /home/user/.config/lxsession/LXDE/
 
-cat <<EOF >/home/user/.config/openbox/rc.xml
-<?xml version="1.0" encoding="UTF-8"?>
-<openbox_config>
-  <desktops><number>1</number></desktops>
-</openbox_config>
+cat <<EOF >/home/user/.config/lxsession/LXDE/autostart
+@xset s off
+@xset -dpms
+@xset s noblank
+
+# NetworkManager will auto-connect to WiFi; no manual wpa_supplicant needed.
+
+# Launch Chromium
+@chromium https://lmsdemo.testpress.in
 EOF
 
-echo "<openbox_menu></openbox_menu>" > /home/user/.config/openbox/menu.xml
 
-
-echo "[CHROOT] Creating .xinitrc..."
-cat <<EOF >/home/user/.xinitrc
-#!/bin/bash
-exec openbox-session
-EOF
-chmod +x /home/user/.xinitrc
-
-
-echo "[CHROOT] Creating Openbox autostart script..."
-cat <<EOF >/home/user/.config/openbox/autostart
-#!/bin/bash
-
-# Connect WiFi
-wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
-
-# Disable screen blanking
-xset s off
-xset -dpms
-xset s noblank
-
-# Launch Chromium (normal mode)
-chromium https://lmsdemo.testpress.in &
-EOF
-
-chmod +x /home/user/.config/openbox/autostart
+echo "[CHROOT] Fixing permissions..."
 chown -R user:user /home/user/.config
-chown user:user /home/user/.xinitrc
 
 
-echo "[CHROOT] Done: Full GUI, WiFi, Chromium setup completed successfully."
+echo "[CHROOT] DONE — LXDE desktop, WiFi autoconnect, LightDM autologin, Chromium autostart."
 
