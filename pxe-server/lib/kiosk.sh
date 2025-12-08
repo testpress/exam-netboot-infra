@@ -63,6 +63,7 @@ perform_kiosk_customization() {
     _inject_kiosk_policies "$unsquash_dir"
     _inject_kiosk_service "$unsquash_dir"
     _inject_kiosk_extensions "$unsquash_dir"
+    _inject_just_perfection_chroot "$unsquash_dir"
     
     # ─────────────────────────────────────────────────────────────────────────
     # Repack the squashfs
@@ -528,4 +529,88 @@ POLICIES_JSON
 
     chmod 644 "$policies_file"
     debug "Firefox policies created at $policies_file"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Just Perfection Extension Installation (via Chroot)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_inject_just_perfection_chroot() {
+    local rootdir="$1"
+    
+    info "Installing Just Perfection extension via chroot..."
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Setup chroot environment
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # Mount necessary filesystems for chroot
+    mount --bind /dev "$rootdir/dev" || { warn "Failed to mount /dev"; return 1; }
+    mount --bind /sys "$rootdir/sys" || { warn "Failed to mount /sys"; umount "$rootdir/dev"; return 1; }
+    mount --bind /proc "$rootdir/proc" || { warn "Failed to mount /proc"; umount "$rootdir/sys" "$rootdir/dev"; return 1; }
+    mount --bind /run "$rootdir/run" 2>/dev/null || true  # Optional, for resolv.conf
+    
+    # Copy resolv.conf for DNS resolution inside chroot
+    cp /etc/resolv.conf "$rootdir/etc/resolv.conf" 2>/dev/null || true
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Install Just Perfection via apt
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    info "Running apt update and installing Just Perfection..."
+    chroot "$rootdir" /bin/bash -c "apt-get update -qq && apt-get install -y -qq gnome-shell-extension-just-perfection" || {
+        warn "apt install failed, continuing anyway"
+    }
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Create GNOME Schema Overrides
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    local schemas_dir="$rootdir/usr/share/glib-2.0/schemas"
+    mkdir -p "$schemas_dir"
+    
+    # Override 1: Enable ONLY Just Perfection extension
+    info "Creating lockdown schema override..."
+    cat > "$schemas_dir/99-kiosk-lockdown.gschema.override" <<'LOCKDOWN_OVERRIDE'
+[org.gnome.shell]
+enabled-extensions=['just-perfection-desktop@just-perfection.org']
+LOCKDOWN_OVERRIDE
+    
+    # Override 2: Just Perfection settings for super minimal UI
+    info "Creating Just Perfection minimal UI override..."
+    cat > "$schemas_dir/99-just-perfection-minimal.gschema.override" <<'JUSTPERF_OVERRIDE'
+[org.gnome.shell.extensions.just-perfection]
+activities-button=false
+workspace-indicator=false
+hot-corner=false
+panel=false
+top-panel=false
+dash=false
+osd=false
+background-menu=false
+app-menu=false
+clock-menu=false
+system-menu=false
+JUSTPERF_OVERRIDE
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Compile schemas inside chroot
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    info "Compiling GNOME schemas..."
+    chroot "$rootdir" /bin/bash -c "glib-compile-schemas /usr/share/glib-2.0/schemas" || {
+        warn "Schema compilation failed"
+    }
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Cleanup chroot mounts
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    info "Cleaning up chroot mounts..."
+    umount "$rootdir/run" 2>/dev/null || true
+    umount "$rootdir/proc" 2>/dev/null || true
+    umount "$rootdir/sys" 2>/dev/null || true
+    umount "$rootdir/dev" 2>/dev/null || true
+    
+    debug "Just Perfection installation complete"
 }
