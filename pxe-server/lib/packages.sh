@@ -6,15 +6,13 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 readonly REQUIRED_PACKAGES=(
-    nginx                   # Web server for serving ISO contents
     dnsmasq                 # DHCP + TFTP server
     nfs-kernel-server       # NFS server for root filesystem
     unzip                   # For extracting syslinux
     squashfs-tools          # For unsquashfs/mksquashfs
     wget                    # For downloading syslinux
     xbindkeys               # For kiosk key bindings
-    iptables                # For firewall rules in kiosk
-    aria2                   # Fast downloader (optional)
+    aria2                   # Fast multi-threaded downloader
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════

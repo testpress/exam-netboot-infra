@@ -11,12 +11,11 @@ ISO_PATH="${ISO_PATH:-/root/ubuntu-24.04.3-desktop-amd64.iso}"
 
 # Directories
 WORK_DIR="${WORK_DIR:-/root/pxe_work}"
-PXE_WEBROOT="${PXE_WEBROOT:-/var/www/html/desktop/u2404}"
+PXE_ROOT="${PXE_ROOT:-/srv/pxe/u2404}"
 TFTP_ROOT="${TFTP_ROOT:-/tftp}"
 
 # Config file locations
 DNSMASQ_CONF="${DNSMASQ_CONF:-/etc/dnsmasq.d/pxe.conf}"
-NGINX_SITE="${NGINX_SITE:-/etc/nginx/sites-enabled/pxe.conf}"
 NFS_EXPORTS="${NFS_EXPORTS:-/etc/exports}"
 
 # DHCP Settings
@@ -36,6 +35,11 @@ KIOSK_URL="${KIOSK_URL:-https://lmsdemo.testpress.in}"
 KIOSK_SSID="${KIOSK_SSID:-}"
 KIOSK_PASSWORD="${KIOSK_PASSWORD:-}"
 
+# Kiosk Debug/Lockdown Options (set via --kiosk-debug to disable all)
+KIOSK_BLOCK_KEYS="${KIOSK_BLOCK_KEYS:-true}"           # Block F1-F12, Super key
+KIOSK_DISABLE_SHORTCUTS="${KIOSK_DISABLE_SHORTCUTS:-true}"  # Disable GNOME shortcuts
+KIOSK_WAIT_GNOME="${KIOSK_WAIT_GNOME:-true}"           # Wait for GNOME session
+KIOSK_ENABLE_XBINDKEYS="${KIOSK_ENABLE_XBINDKEYS:-true}"  # Enable Ctrl+Alt+R reload
 # Syslinux/PXELINUX download URL
 SYSLINUX_URL="${SYSLINUX_URL:-https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.zip}"
 
@@ -77,7 +81,7 @@ load_config() {
     
     debug "Configuration loaded:"
     debug "  ISO_PATH: $ISO_PATH"
-    debug "  PXE_WEBROOT: $PXE_WEBROOT"
+    debug "  PXE_ROOT: $PXE_ROOT"
     debug "  TFTP_ROOT: $TFTP_ROOT"
     debug "  ENABLE_KIOSK: $ENABLE_KIOSK"
     debug "  NFS_CLIENT_NETS: ${NFS_CLIENT_NETS[*]}"

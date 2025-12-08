@@ -145,12 +145,12 @@ populate_tftp_files() {
     
     info "Copying kernel and initrd..."
     
-    if [[ -f "$PXE_WEBROOT/casper/vmlinuz" ]] && [[ -f "$PXE_WEBROOT/casper/initrd" ]]; then
-        cp -f "$PXE_WEBROOT/casper/vmlinuz" "$TFTP_ROOT/boot/casper/"
-        cp -f "$PXE_WEBROOT/casper/initrd" "$TFTP_ROOT/boot/casper/"
+    if [[ -f "$PXE_ROOT/casper/vmlinuz" ]] && [[ -f "$PXE_ROOT/casper/initrd" ]]; then
+        cp -f "$PXE_ROOT/casper/vmlinuz" "$TFTP_ROOT/boot/casper/"
+        cp -f "$PXE_ROOT/casper/initrd" "$TFTP_ROOT/boot/casper/"
         debug "Kernel and initrd copied"
     else
-        abort "Kernel/initrd not found in $PXE_WEBROOT/casper"
+        abort "Kernel/initrd not found in $PXE_ROOT/casper"
     fi
     
     # ─────────────────────────────────────────────────────────────────────────

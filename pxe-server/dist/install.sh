@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T05:30:05Z"
+readonly BUILD_DATE="2025-12-08T07:10:58Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -161,12 +161,11 @@ ISO_PATH="${ISO_PATH:-/root/ubuntu-24.04.3-desktop-amd64.iso}"
 
 # Directories
 WORK_DIR="${WORK_DIR:-/root/pxe_work}"
-PXE_WEBROOT="${PXE_WEBROOT:-/var/www/html/desktop/u2404}"
+PXE_ROOT="${PXE_ROOT:-/srv/pxe/u2404}"
 TFTP_ROOT="${TFTP_ROOT:-/tftp}"
 
 # Config file locations
 DNSMASQ_CONF="${DNSMASQ_CONF:-/etc/dnsmasq.d/pxe.conf}"
-NGINX_SITE="${NGINX_SITE:-/etc/nginx/sites-enabled/pxe.conf}"
 NFS_EXPORTS="${NFS_EXPORTS:-/etc/exports}"
 
 # DHCP Settings
@@ -186,6 +185,11 @@ KIOSK_URL="${KIOSK_URL:-https://lmsdemo.testpress.in}"
 KIOSK_SSID="${KIOSK_SSID:-}"
 KIOSK_PASSWORD="${KIOSK_PASSWORD:-}"
 
+# Kiosk Debug/Lockdown Options (set via --kiosk-debug to disable all)
+KIOSK_BLOCK_KEYS="${KIOSK_BLOCK_KEYS:-true}"           # Block F1-F12, Super key
+KIOSK_DISABLE_SHORTCUTS="${KIOSK_DISABLE_SHORTCUTS:-true}"  # Disable GNOME shortcuts
+KIOSK_WAIT_GNOME="${KIOSK_WAIT_GNOME:-true}"           # Wait for GNOME session
+KIOSK_ENABLE_XBINDKEYS="${KIOSK_ENABLE_XBINDKEYS:-true}"  # Enable Ctrl+Alt+R reload
 # Syslinux/PXELINUX download URL
 SYSLINUX_URL="${SYSLINUX_URL:-https://mirrors.edge.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.zip}"
 
@@ -227,7 +231,7 @@ load_config() {
     
     debug "Configuration loaded:"
     debug "  ISO_PATH: $ISO_PATH"
-    debug "  PXE_WEBROOT: $PXE_WEBROOT"
+    debug "  PXE_ROOT: $PXE_ROOT"
     debug "  TFTP_ROOT: $TFTP_ROOT"
     debug "  ENABLE_KIOSK: $ENABLE_KIOSK"
     debug "  NFS_CLIENT_NETS: ${NFS_CLIENT_NETS[*]}"
@@ -494,23 +498,44 @@ SERVER_IP=""
 detect_network_interface_and_ip() {
     info "Detecting network configuration..."
     
-    # Find the default route interface
-    DEFAULT_IF="$(ip -o -4 route show to default 2>/dev/null | awk '{print $5}' | head -n1 || true)"
+    # Allow CLI/config override via NETWORK_INTERFACE
+    if [[ -n "${NETWORK_INTERFACE:-}" ]]; then
+        DEFAULT_IF="$NETWORK_INTERFACE"
+        info "Using specified interface: $DEFAULT_IF"
+    else
+        # Try to find an ethernet interface first (prefer eth*, enp*, eno* over wlan*, wlp*)
+        DEFAULT_IF=""
+        
+        # Get all interfaces with IPv4 addresses
+        local interfaces
+        interfaces=$(ip -o -4 addr show | awk '{print $2}' | grep -v '^lo$' | sort -u)
+        
+        # Prefer ethernet over wireless
+        for iface in $interfaces; do
+            # Check if it's an ethernet interface (not wireless)
+            if [[ "$iface" =~ ^(eth|enp|eno|ens) ]]; then
+                DEFAULT_IF="$iface"
+                info "Found ethernet interface: $DEFAULT_IF"
+                break
+            fi
+        done
+        
+        # If no ethernet found, fall back to any interface with an IP
+        if [[ -z "$DEFAULT_IF" ]]; then
+            DEFAULT_IF=$(echo "$interfaces" | head -n1)
+            warn "No ethernet interface found, using: $DEFAULT_IF"
+        fi
+    fi
     
     if [[ -z "$DEFAULT_IF" ]]; then
-        abort "Cannot detect default network interface"
+        abort "Cannot detect network interface. Use --interface <name> to specify manually."
     fi
     
-    # Get the primary IP address
-    SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+    # Get IP address from the selected interface
+    SERVER_IP=$(ip -4 addr show "$DEFAULT_IF" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)
     
     if [[ -z "$SERVER_IP" ]]; then
-        # Fallback: try to get IP from the detected interface
-        SERVER_IP="$(ip -4 addr show "$DEFAULT_IF" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)"
-    fi
-    
-    if [[ -z "$SERVER_IP" ]]; then
-        abort "Cannot determine server IP address"
+        abort "Cannot determine IP address for $DEFAULT_IF. Ensure it has an IP configured."
     fi
     
     info "Network interface: $DEFAULT_IF"
@@ -539,6 +564,235 @@ get_all_ips() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# lib/network_static.sh
+# ═══════════════════════════════════════════════════════════════════════════════
+# lib/network_static.sh - Static IP configuration via netplan
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Static Network Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Configuration defaults
+STATIC_IP="${STATIC_IP:-10.0.0.1/24}"
+SKIP_NETWORK="${SKIP_NETWORK:-false}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Netplan Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+configure_static_ip() {
+    if [[ "${SKIP_NETWORK:-false}" == true ]]; then
+        info "Skipping network configuration (--skip-network)"
+        return 0
+    fi
+    
+    # Check if running on a system with netplan
+    if ! command -v netplan &>/dev/null; then
+        warn "netplan not found, skipping static IP configuration"
+        warn "Please configure network manually"
+        return 0
+    fi
+    
+    # Ensure we have interface info
+    if [[ -z "${DEFAULT_IF:-}" ]]; then
+        detect_network_interface_and_ip
+    fi
+    
+    local netplan_file="/etc/netplan/90-pxe-server.yaml"
+    
+    info "Configuring static IP: $STATIC_IP on $DEFAULT_IF"
+    
+    if [[ "${DRY_RUN:-false}" == true ]]; then
+        info "[DRY-RUN] Would write netplan config to $netplan_file"
+        info "[DRY-RUN] Interface: $DEFAULT_IF"
+        info "[DRY-RUN] Static IP: $STATIC_IP"
+        return 0
+    fi
+    
+    # Backup existing netplan configs
+    if [[ -d /etc/netplan ]]; then
+        mkdir -p /etc/netplan/backup
+        cp /etc/netplan/*.yaml /etc/netplan/backup/ 2>/dev/null || true
+        debug "Backed up existing netplan configs"
+    fi
+    
+    # Write new netplan configuration
+    cat > "$netplan_file" <<EOF
+# PXE Server Static IP Configuration
+# Generated by pxe-server installer on $(date)
+# To revert: rm $netplan_file && netplan apply
+
+network:
+  version: 2
+  renderer: networkd
+  
+  ethernets:
+    $DEFAULT_IF:
+      dhcp4: false
+      addresses:
+        - $STATIC_IP
+EOF
+
+    # Set correct permissions
+    chmod 600 "$netplan_file"
+    
+    log_success "Netplan configuration written: $netplan_file"
+}
+
+apply_netplan() {
+    if [[ "${SKIP_NETWORK:-false}" == true ]]; then
+        return 0
+    fi
+    
+    if [[ "${DRY_RUN:-false}" == true ]]; then
+        info "[DRY-RUN] Would run: netplan apply"
+        return 0
+    fi
+    
+    info "Applying netplan configuration..."
+    
+    # Generate first to check for errors
+    if ! netplan generate 2>/dev/null; then
+        error "Netplan configuration has errors"
+        error "Check: cat /etc/netplan/90-pxe-server.yaml"
+        return 1
+    fi
+    
+    # Apply the configuration
+    if netplan apply; then
+        log_success "Network configuration applied"
+        info "New IP: $STATIC_IP on $DEFAULT_IF"
+    else
+        error "Failed to apply netplan"
+        error "Network may need manual configuration"
+        return 1
+    fi
+}
+
+# Combined function for the install step
+configure_network() {
+    configure_static_ip
+    apply_netplan
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# lib/iso_download.sh
+# ═══════════════════════════════════════════════════════════════════════════════
+# lib/iso_download.sh - Auto-download Ubuntu ISO with latest version detection
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Ubuntu ISO Download Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Base URL for Ubuntu 24.04 LTS releases
+UBUNTU_RELEASES_URL="${UBUNTU_RELEASES_URL:-https://releases.ubuntu.com/24.04/}"
+ISO_DOWNLOAD_DIR="${ISO_DOWNLOAD_DIR:-/root}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Version Detection
+# ═══════════════════════════════════════════════════════════════════════════════
+
+detect_latest_iso() {
+    info "Detecting latest Ubuntu 24.04.x ISO..."
+    
+    local iso_filename
+    iso_filename=$(curl -sL "$UBUNTU_RELEASES_URL" 2>/dev/null | \
+        grep -oE 'ubuntu-24\.04\.[0-9]+-desktop-amd64\.iso' | \
+        sort -V | tail -1)
+    
+    if [[ -z "$iso_filename" ]]; then
+        warn "Could not detect latest ISO version, falling back to 24.04"
+        iso_filename="ubuntu-24.04-desktop-amd64.iso"
+    fi
+    
+    echo "$iso_filename"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ISO Download
+# ═══════════════════════════════════════════════════════════════════════════════
+
+download_iso() {
+    local force_download="${1:-false}"
+    
+    # If ISO exists and not forcing, skip
+    if [[ -f "${ISO_PATH:-}" ]] && [[ "$force_download" != true ]]; then
+        info "ISO already exists: $ISO_PATH"
+        return 0
+    fi
+    
+    local iso_filename
+    iso_filename=$(detect_latest_iso)
+    local iso_url="${UBUNTU_RELEASES_URL}${iso_filename}"
+    local target_path="${ISO_DOWNLOAD_DIR}/${iso_filename}"
+    
+    info "Latest Ubuntu ISO: $iso_filename"
+    info "Download URL: $iso_url"
+    
+    # Confirm download if interactive
+    if [[ "${INTERACTIVE:-true}" == true ]] && [[ "${DRY_RUN:-false}" != true ]]; then
+        read -rp "Download $iso_filename (~6GB)? [Y/n] " response
+        case "$response" in
+            [nN][oO]|[nN])
+                abort "ISO download cancelled by user"
+                ;;
+        esac
+    fi
+    
+    if [[ "${DRY_RUN:-false}" == true ]]; then
+        info "[DRY-RUN] Would download: $iso_url"
+        info "[DRY-RUN] To: $target_path"
+        return 0
+    fi
+    
+    # Create download directory
+    mkdir -p "$ISO_DOWNLOAD_DIR"
+    
+    info "Downloading Ubuntu ISO (this may take a while)..."
+    
+    # Try aria2c first (faster, multi-threaded)
+    if command -v aria2c &>/dev/null; then
+        info "Using aria2c for faster download..."
+        if aria2c -x 16 -s 16 -k 1M --summary-interval=10 \
+            -d "$ISO_DOWNLOAD_DIR" -o "$iso_filename" "$iso_url"; then
+            ISO_PATH="$target_path"
+            log_success "ISO downloaded: $ISO_PATH"
+            return 0
+        else
+            warn "aria2c download failed, trying wget..."
+        fi
+    fi
+    
+    # Fallback to wget
+    if command -v wget &>/dev/null; then
+        if wget --progress=bar:force -O "$target_path" "$iso_url"; then
+            ISO_PATH="$target_path"
+            log_success "ISO downloaded: $ISO_PATH"
+            return 0
+        else
+            abort "wget download failed"
+        fi
+    fi
+    
+    # Fallback to curl
+    if curl -L --progress-bar -o "$target_path" "$iso_url"; then
+        ISO_PATH="$target_path"
+        log_success "ISO downloaded: $ISO_PATH"
+        return 0
+    fi
+    
+    abort "Failed to download ISO. Please download manually from: $iso_url"
+}
+
+# Check if ISO download is needed
+check_iso_needed() {
+    if [[ -z "${ISO_PATH:-}" ]] || [[ ! -f "${ISO_PATH:-}" ]]; then
+        return 0  # Download needed
+    fi
+    return 1  # ISO exists
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # lib/packages.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/packages.sh - Package installation
@@ -548,15 +802,13 @@ get_all_ips() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 readonly REQUIRED_PACKAGES=(
-    nginx                   # Web server for serving ISO contents
     dnsmasq                 # DHCP + TFTP server
     nfs-kernel-server       # NFS server for root filesystem
     unzip                   # For extracting syslinux
     squashfs-tools          # For unsquashfs/mksquashfs
     wget                    # For downloading syslinux
     xbindkeys               # For kiosk key bindings
-    iptables                # For firewall rules in kiosk
-    aria2                   # Fast downloader (optional)
+    aria2                   # Fast multi-threaded downloader
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -629,7 +881,7 @@ prepare_directories() {
     if [[ "${DRY_RUN:-false}" == true ]]; then
         info "[DRY-RUN] Would create directories:"
         info "  - $WORK_DIR"
-        info "  - $PXE_WEBROOT"
+        info "  - $PXE_ROOT"
         info "  - $TFTP_ROOT/bios"
         info "  - $TFTP_ROOT/boot/casper"
         info "  - $TFTP_ROOT/grub"
@@ -637,7 +889,7 @@ prepare_directories() {
     fi
     
     mkdir -p "$WORK_DIR"
-    mkdir -p "$PXE_WEBROOT"
+    mkdir -p "$PXE_ROOT"
     mkdir -p "$TFTP_ROOT/bios"
     mkdir -p "$TFTP_ROOT/boot/casper"
     mkdir -p "$TFTP_ROOT/grub"
@@ -650,12 +902,12 @@ prepare_directories() {
 # ISO Mounting and Content Population
 # ═══════════════════════════════════════════════════════════════════════════════
 
-mount_and_populate_webroot() {
-    info "Mounting ISO and populating webroot..."
+mount_and_populate_pxeroot() {
+    info "Mounting ISO and populating pxeroot..."
     
     if [[ "${DRY_RUN:-false}" == true ]]; then
         info "[DRY-RUN] Would mount: $ISO_PATH"
-        info "[DRY-RUN] Would rsync to: $PXE_WEBROOT"
+        info "[DRY-RUN] Would rsync to: $PXE_ROOT"
         return 0
     fi
     
@@ -675,25 +927,25 @@ mount_and_populate_webroot() {
     
     # Copy contents to webroot
     info "Copying ISO contents to webroot (this may take a few minutes)..."
-    if ! rsync -a --delete "$mnt/" "$PXE_WEBROOT/"; then
+    if ! rsync -a --delete "$mnt/" "$PXE_ROOT/"; then
         umount "$mnt" 2>/dev/null || true
         abort "Failed to copy ISO contents"
     fi
     
     # Ensure .disk directory is copied (needed for Ubuntu boot)
     if [[ -d "$mnt/.disk" ]]; then
-        rsync -a "$mnt/.disk" "$PXE_WEBROOT/"
+        rsync -a "$mnt/.disk" "$PXE_ROOT/"
     fi
     
     # Unmount
     umount "$mnt"
     
     # Verify critical files exist
-    if [[ ! -f "$PXE_WEBROOT/casper/vmlinuz" ]]; then
+    if [[ ! -f "$PXE_ROOT/casper/vmlinuz" ]]; then
         abort "Kernel not found in ISO - is this a valid Ubuntu Desktop ISO?"
     fi
     
-    if [[ ! -f "$PXE_WEBROOT/casper/initrd" ]]; then
+    if [[ ! -f "$PXE_ROOT/casper/initrd" ]]; then
         abort "Initrd not found in ISO - is this a valid Ubuntu Desktop ISO?"
     fi
     
@@ -864,12 +1116,12 @@ populate_tftp_files() {
     
     info "Copying kernel and initrd..."
     
-    if [[ -f "$PXE_WEBROOT/casper/vmlinuz" ]] && [[ -f "$PXE_WEBROOT/casper/initrd" ]]; then
-        cp -f "$PXE_WEBROOT/casper/vmlinuz" "$TFTP_ROOT/boot/casper/"
-        cp -f "$PXE_WEBROOT/casper/initrd" "$TFTP_ROOT/boot/casper/"
+    if [[ -f "$PXE_ROOT/casper/vmlinuz" ]] && [[ -f "$PXE_ROOT/casper/initrd" ]]; then
+        cp -f "$PXE_ROOT/casper/vmlinuz" "$TFTP_ROOT/boot/casper/"
+        cp -f "$PXE_ROOT/casper/initrd" "$TFTP_ROOT/boot/casper/"
         debug "Kernel and initrd copied"
     else
-        abort "Kernel/initrd not found in $PXE_WEBROOT/casper"
+        abort "Kernel/initrd not found in $PXE_ROOT/casper"
     fi
     
     # ─────────────────────────────────────────────────────────────────────────
@@ -896,7 +1148,7 @@ configure_nfs_exports() {
     if [[ "${DRY_RUN:-false}" == true ]]; then
         info "[DRY-RUN] Would configure NFS exports in $NFS_EXPORTS:"
         for net in "${NFS_CLIENT_NETS[@]}"; do
-            info "  $PXE_WEBROOT $net(ro,sync,no_subtree_check)"
+            info "  $PXE_ROOT $net(ro,sync,no_subtree_check)"
         done
         return 0
     fi
@@ -917,14 +1169,14 @@ configure_nfs_exports() {
     
     local added=0
     for net in "${NFS_CLIENT_NETS[@]}"; do
-        local entry="$PXE_WEBROOT $net(ro,sync,no_subtree_check)"
+        local entry="$PXE_ROOT $net(ro,sync,no_subtree_check)"
         
         # Check if entry already exists
         if grep -qxF "$entry" "$NFS_EXPORTS" 2>/dev/null; then
             debug "NFS export already exists: $entry"
         else
             echo "$entry" >> "$NFS_EXPORTS"
-            info "Added NFS export: $PXE_WEBROOT for $net"
+            info "Added NFS export: $PXE_ROOT for $net"
             ((added++))
         fi
     done
@@ -1003,13 +1255,12 @@ domain=pxe.local
 # ───────────────────────────────────────────────────────────────────────────────
 dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},${DHCP_NETMASK},${DHCP_LEASE}
 
-# Gateway (option 3) and DNS (option 6)
+# Gateway (option 3) and DNS (option 6) - both point to PXE server
 dhcp-option=3,$SERVER_IP
 dhcp-option=6,$SERVER_IP
 
-# Upstream DNS
-server=8.8.8.8
-server=8.8.4.4
+# No upstream DNS - clients are isolated and only access NFS
+# (PXE server can use its own DNS for setup purposes)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # TFTP Configuration
@@ -1081,7 +1332,7 @@ LABEL ubuntu
     MENU LABEL Ubuntu 24.04 Desktop (NFS Boot)
     MENU DEFAULT
     KERNEL /boot/casper/vmlinuz
-    APPEND initrd=/boot/casper/initrd boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_WEBROOT ip=dhcp quiet splash ---
+    APPEND initrd=/boot/casper/initrd boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_ROOT ip=dhcp quiet splash ---
 EOF
     
     log_success "PXELINUX configuration written"
@@ -1115,12 +1366,12 @@ set menu_color_normal=white/black
 set menu_color_highlight=black/light-gray
 
 menuentry "Ubuntu 24.04 Desktop (NFS Boot)" {
-    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_WEBROOT ip=dhcp quiet splash ---
+    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_ROOT ip=dhcp quiet splash ---
     initrd /boot/casper/initrd
 }
 
 menuentry "Ubuntu 24.04 Desktop (NFS Boot - Safe Mode)" {
-    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_WEBROOT ip=dhcp nomodeset
+    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_ROOT ip=dhcp nomodeset
     initrd /boot/casper/initrd
 }
 EOF
@@ -1135,158 +1386,6 @@ test_dnsmasq_config() {
         return 0
     else
         error "dnsmasq configuration has errors"
-        return 1
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# lib/nginx.sh
-# ═══════════════════════════════════════════════════════════════════════════════
-# lib/nginx.sh - Nginx web server configuration
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Nginx Configuration
-# ═══════════════════════════════════════════════════════════════════════════════
-
-configure_nginx_site() {
-    info "Configuring nginx..."
-    
-    if [[ "${DRY_RUN:-false}" == true ]]; then
-        info "[DRY-RUN] Would write nginx config to $NGINX_SITE"
-        info "[DRY-RUN] Would set up webroot at $PXE_WEBROOT"
-        return 0
-    fi
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # Remove default site if it exists and conflicts
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    if [[ -f /etc/nginx/sites-enabled/default ]]; then
-        debug "Removing default nginx site"
-        rm -f /etc/nginx/sites-enabled/default
-    fi
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # Write PXE site configuration
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    cat > "$NGINX_SITE" <<'NGINX_EOF'
-# ═══════════════════════════════════════════════════════════════════════════════
-# PXE Server Nginx Configuration
-# Generated by pxe-server installer
-# ═══════════════════════════════════════════════════════════════════════════════
-
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-
-    # Webroot for PXE files
-    root /var/www/html/desktop/u2404;
-    
-    # Enable directory listing for debugging
-    autoindex on;
-    autoindex_exact_size off;
-    autoindex_localtime on;
-
-    # Main location
-    location / {
-        try_files $uri $uri/ =404;
-    }
-
-    # ───────────────────────────────────────────────────────────────────────────
-    # Performance tuning for large file transfers
-    # ───────────────────────────────────────────────────────────────────────────
-    
-    # Allow large uploads/downloads (squashfs can be several GB)
-    client_max_body_size 5G;
-    
-    # Enable sendfile for efficient file serving
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    
-    # Increase timeouts for large files
-    send_timeout 300s;
-    keepalive_timeout 300s;
-    
-    # ───────────────────────────────────────────────────────────────────────────
-    # Caching headers for PXE boot files
-    # ───────────────────────────────────────────────────────────────────────────
-    
-    location ~* \.(squashfs|vmlinuz|initrd)$ {
-        add_header Cache-Control "public, max-age=3600";
-    }
-
-    # ───────────────────────────────────────────────────────────────────────────
-    # Error pages
-    # ───────────────────────────────────────────────────────────────────────────
-    
-    error_page 404 /errors/404.html;
-    error_page 500 502 503 504 /errors/50x.html;
-
-    location = /errors/404.html {
-        internal;
-        return 404 "PXE Server: File not found\n";
-    }
-
-    location = /errors/50x.html {
-        internal;
-        return 500 "PXE Server: Internal error\n";
-    }
-    
-    # ───────────────────────────────────────────────────────────────────────────
-    # Health check endpoint
-    # ───────────────────────────────────────────────────────────────────────────
-    
-    location = /health {
-        return 200 "OK\n";
-        add_header Content-Type text/plain;
-    }
-}
-NGINX_EOF
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Set permissions
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    info "Setting webroot permissions..."
-    chown -R www-data:www-data /var/www/html || abort "Failed to chown webroot"
-    chmod -R 755 /var/www/html || abort "Failed to chmod webroot"
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # Test and reload nginx
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    info "Testing nginx configuration..."
-    if ! nginx -t 2>&1; then
-        abort "nginx configuration test failed"
-    fi
-    
-    info "Reloading nginx..."
-    if ! systemctl reload nginx; then
-        # Try restart if reload fails
-        if ! systemctl restart nginx; then
-            abort "Failed to reload/restart nginx"
-        fi
-    fi
-    
-    log_success "nginx configured and reloaded"
-}
-
-# Test nginx configuration
-test_nginx_config() {
-    nginx -t 2>&1
-}
-
-# Check if nginx is serving the webroot
-check_nginx_webroot() {
-    local url="http://localhost/casper/"
-    if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q "200\|301\|302"; then
-        debug "nginx is serving webroot correctly"
-        return 0
-    else
-        warn "nginx may not be serving webroot correctly"
         return 1
     fi
 }
@@ -1311,17 +1410,17 @@ perform_kiosk_customization() {
     info "Performing kiosk customization..."
     
     # Find squashfs file
-    local squash="$PXE_WEBROOT/casper/filesystem.squashfs"
+    local squash="$PXE_ROOT/casper/filesystem.squashfs"
     
     # Try alternate name if primary not found
     if [[ ! -f "$squash" ]]; then
-        squash="$PXE_WEBROOT/casper/minimal.squashfs"
+        squash="$PXE_ROOT/casper/minimal.squashfs"
     fi
     
     if [[ ! -f "$squash" ]]; then
         warn "squashfs not found - skipping kiosk customization"
-        warn "Looked for: $PXE_WEBROOT/casper/filesystem.squashfs"
-        warn "        and: $PXE_WEBROOT/casper/minimal.squashfs"
+        warn "Looked for: $PXE_ROOT/casper/filesystem.squashfs"
+        warn "        and: $PXE_ROOT/casper/minimal.squashfs"
         return 0
     fi
     
@@ -1392,7 +1491,7 @@ _inject_kiosk_autostart() {
     local autostart_path="$profile_dir/99-kiosk-autostart.sh"
     info "Injecting kiosk autostart script..."
     
-    # Create the autostart script
+    # Create the autostart script with configurable options
     cat > "$autostart_path" <<KIOSK_SCRIPT
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1405,6 +1504,15 @@ KIOSK_URL="${KIOSK_URL}"
 KIOSK_SSID="${KIOSK_SSID:-}"
 KIOSK_PASSWORD="${KIOSK_PASSWORD:-}"
 
+# Configurable lockdown options
+KIOSK_BLOCK_KEYS="${KIOSK_BLOCK_KEYS:-true}"
+KIOSK_DISABLE_SHORTCUTS="${KIOSK_DISABLE_SHORTCUTS:-true}"
+KIOSK_WAIT_GNOME="${KIOSK_WAIT_GNOME:-true}"
+KIOSK_ENABLE_XBINDKEYS="${KIOSK_ENABLE_XBINDKEYS:-true}"
+
+LOG="/tmp/kiosk-autostart.log"
+echo "\$(date -Iseconds) Kiosk script start" >> "\$LOG"
+
 # Only run in graphical session
 [ -z "\$DISPLAY" ] && exit 0
 
@@ -1414,20 +1522,47 @@ LOCKFILE="/tmp/.kiosk-started-\$USER"
 touch "\$LOCKFILE"
 
 # ───────────────────────────────────────────────────────────────────────────────
+# Wait for GNOME Session (configurable)
+# ───────────────────────────────────────────────────────────────────────────────
+
+wait_for_gnome() {
+    if [ "\$KIOSK_WAIT_GNOME" != "true" ]; then
+        sleep 3
+        return
+    fi
+    
+    echo "\$(date -Iseconds) Waiting for GNOME session..." >> "\$LOG"
+    local attempts=0
+    while ! gsettings list-schemas >/dev/null 2>&1; do
+        sleep 1
+        attempts=\$((attempts + 1))
+        [ \$attempts -gt 30 ] && break
+    done
+    echo "\$(date -Iseconds) GNOME session ready (or timeout)" >> "\$LOG"
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
 # WiFi Connection (if configured)
 # ───────────────────────────────────────────────────────────────────────────────
 
 connect_wifi() {
     if [ -n "\$KIOSK_SSID" ] && [ -n "\$KIOSK_PASSWORD" ]; then
+        echo "\$(date -Iseconds) Connecting to WiFi: \$KIOSK_SSID" >> "\$LOG"
         nmcli device wifi connect "\$KIOSK_SSID" password "\$KIOSK_PASSWORD" 2>/dev/null || true
     fi
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Disable GNOME Shortcuts
+# Disable GNOME Shortcuts (configurable)
 # ───────────────────────────────────────────────────────────────────────────────
 
 disable_shortcuts() {
+    if [ "\$KIOSK_DISABLE_SHORTCUTS" != "true" ]; then
+        echo "\$(date -Iseconds) Skipping shortcut disable (debug mode)" >> "\$LOG"
+        return
+    fi
+    
+    echo "\$(date -Iseconds) Disabling GNOME shortcuts" >> "\$LOG"
     gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]" 2>/dev/null || true
@@ -1437,10 +1572,56 @@ disable_shortcuts() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
+# Block Keys (configurable) - F1-F12, Super, Ctrl+Q, etc.
+# ───────────────────────────────────────────────────────────────────────────────
+
+block_keys() {
+    if [ "\$KIOSK_BLOCK_KEYS" != "true" ]; then
+        echo "\$(date -Iseconds) Skipping key blocking (debug mode)" >> "\$LOG"
+        return
+    fi
+    
+    echo "\$(date -Iseconds) Blocking dangerous keys" >> "\$LOG"
+    # Block F1-F12 (keycodes 67-76, 95-96), Super (133-134)
+    for keycode in 67 68 69 70 71 72 73 74 75 76 95 96 133 134; do
+        xmodmap -e "keycode \$keycode = NoSymbol" 2>/dev/null || true
+    done
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
+# xbindkeys Reload Shortcut (Ctrl+Alt+R)
+# ───────────────────────────────────────────────────────────────────────────────
+
+setup_reload_shortcut() {
+    if [ "\$KIOSK_ENABLE_XBINDKEYS" != "true" ]; then
+        echo "\$(date -Iseconds) Skipping xbindkeys (debug mode)" >> "\$LOG"
+        return
+    fi
+    
+    local kiosk_dir="/home/\$KIOSK_USER/.kiosk"
+    mkdir -p "\$kiosk_dir"
+    
+    # Create xbindkeys config
+    cat > "\$kiosk_dir/.xbindkeysrc" <<XBIND
+# Reload Firefox (Ctrl + Alt + R)
+"pkill -u \$KIOSK_USER firefox; sleep 0.5; firefox --kiosk --private-window '\$KIOSK_URL' --new-instance &"
+  control+alt + r
+XBIND
+    
+    chown -R "\$KIOSK_USER:\$KIOSK_USER" "\$kiosk_dir"
+    
+    # Start xbindkeys
+    pkill -u "\$KIOSK_USER" xbindkeys 2>/dev/null || true
+    xbindkeys -f "\$kiosk_dir/.xbindkeysrc" &
+    echo "\$(date -Iseconds) xbindkeys started (Ctrl+Alt+R to reload)" >> "\$LOG"
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
 # Prevent Screen Sleep
 # ───────────────────────────────────────────────────────────────────────────────
 
 prevent_sleep() {
+    echo "\$(date -Iseconds) Disabling screen sleep" >> "\$LOG"
     xset s off 2>/dev/null || true
     xset -dpms 2>/dev/null || true
     xset s noblank 2>/dev/null || true
@@ -1449,30 +1630,52 @@ prevent_sleep() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Launch Firefox in Kiosk Mode
+# Install and Enable Firefox Systemd User Service (auto-restart)
 # ───────────────────────────────────────────────────────────────────────────────
 
-launch_firefox() {
-    # Kill any existing Firefox instances
-    pkill -u "\$USER" firefox 2>/dev/null || true
-    sleep 0.5
+setup_firefox_service() {
+    local service_dir="/home/\$KIOSK_USER/.config/systemd/user"
+    mkdir -p "\$service_dir"
     
-    # Launch in kiosk mode
-    export MOZ_NO_REMOTE=1
-    firefox --kiosk --private-window "\$KIOSK_URL" --new-instance &
+    cat > "\$service_dir/firefox-kiosk.service" <<SYSTEMD
+[Unit]
+Description=Firefox Kiosk Mode
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/firefox --kiosk --private-window \$KIOSK_URL --new-instance
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+SYSTEMD
+    
+    chown -R "\$KIOSK_USER:\$KIOSK_USER" "/home/\$KIOSK_USER/.config"
+    
+    # Enable and start the service
+    sudo -u "\$KIOSK_USER" systemctl --user daemon-reload 2>/dev/null || true
+    sudo -u "\$KIOSK_USER" systemctl --user enable firefox-kiosk.service 2>/dev/null || true
+    sudo -u "\$KIOSK_USER" systemctl --user start firefox-kiosk.service 2>/dev/null || true
+    
+    echo "\$(date -Iseconds) Firefox systemd service enabled (auto-restart)" >> "\$LOG"
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Main
 # ───────────────────────────────────────────────────────────────────────────────
 
-# Wait for desktop to fully load
-sleep 3
-
+wait_for_gnome
 connect_wifi
 disable_shortcuts
+block_keys
+setup_reload_shortcut
 prevent_sleep
-launch_firefox
+setup_firefox_service
+
+echo "\$(date -Iseconds) Kiosk setup complete" >> "\$LOG"
 KIOSK_SCRIPT
 
     chmod +x "$autostart_path"
@@ -1537,11 +1740,11 @@ restart_services() {
     info "Enabling and starting services..."
     
     if [[ "${DRY_RUN:-false}" == true ]]; then
-        info "[DRY-RUN] Would enable and start: nginx, nfs-kernel-server, dnsmasq"
+        info "[DRY-RUN] Would enable and start: nfs-kernel-server, dnsmasq"
         return 0
     fi
     
-    local services=(nginx nfs-kernel-server dnsmasq)
+    local services=(nfs-kernel-server dnsmasq)
     local failed=0
     
     for service in "${services[@]}"; do
@@ -1616,7 +1819,7 @@ cleanup_workdir() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 show_service_status() {
-    local services=(nginx nfs-kernel-server dnsmasq)
+    local services=(nfs-kernel-server dnsmasq)
     
     info "Service Status:"
     for service in "${services[@]}"; do
@@ -1632,7 +1835,7 @@ show_service_status() {
 
 # Check all required services are running
 check_all_services() {
-    local services=(nginx nfs-kernel-server dnsmasq)
+    local services=(nfs-kernel-server dnsmasq)
     local failed=0
     
     for service in "${services[@]}"; do
@@ -1649,7 +1852,6 @@ stop_pxe_services() {
     info "Stopping PXE services..."
     
     systemctl stop dnsmasq 2>/dev/null || true
-    systemctl stop nginx 2>/dev/null || true
     systemctl stop nfs-kernel-server 2>/dev/null || true
     
     log_success "Services stopped"
@@ -1680,16 +1882,17 @@ fi
 
 # All available steps in order
 ALL_STEPS=(
+    iso_download
+    static_ip
     packages
     directories
-    webroot
+    pxeroot
     bootloaders
     tftp
     nfs
     pxelinux
     grub
     dnsmasq
-    nginx
     kiosk
     services
 )
@@ -1697,16 +1900,17 @@ ALL_STEPS=(
 # Get step description
 get_step_description() {
     case "$1" in
+        iso_download) echo "Download Ubuntu ISO (if needed)" ;;
+        static_ip)   echo "Configure static IP via netplan" ;;
         packages)    echo "Install required apt packages" ;;
-        directories) echo "Create TFTP and webroot directories" ;;
-        webroot)     echo "Mount ISO and copy to webroot" ;;
+        directories) echo "Create TFTP and PXE root directories" ;;
+        pxeroot)     echo "Mount ISO and copy to PXE root" ;;
         bootloaders) echo "Download syslinux and UEFI bootloaders" ;;
         tftp)        echo "Populate TFTP with boot files" ;;
         nfs)         echo "Configure NFS exports" ;;
         pxelinux)    echo "Write PXELINUX config (BIOS)" ;;
         grub)        echo "Write GRUB config (UEFI)" ;;
         dnsmasq)     echo "Configure dnsmasq (DHCP/TFTP)" ;;
-        nginx)       echo "Configure nginx web server" ;;
         kiosk)       echo "Customize squashfs for kiosk mode" ;;
         services)    echo "Enable and start services" ;;
         *)           echo "" ;;
@@ -1738,6 +1942,7 @@ PXE Server Setup for Ubuntu Exam Kiosk Environment
 OPTIONS:
   -c, --config FILE       Config file path (default: /etc/pxe-server/config.conf)
   -i, --iso PATH          Path to Ubuntu Desktop ISO (required first time)
+  --interface NAME        Network interface for PXE (default: auto-detect ethernet)
   --no-kiosk              Disable kiosk customization
   --dry-run               Show what would be done without executing
   --skip-packages         Skip apt package installation
@@ -1752,6 +1957,7 @@ STEP CONTROL:
   --step <name>           Run only a single step (useful for debugging)
   --from-step <name>      Resume from a specific step (skip earlier steps)
   --reset                 Clear all progress and start fresh
+  --kiosk-debug           Disable kiosk lockdown (for debugging clients)
 
 EXAMPLES:
   # First-time interactive setup
@@ -1779,16 +1985,17 @@ EXAMPLES:
   sudo ./install.sh --reset
 
 AVAILABLE STEPS:
+  iso_download - Download Ubuntu ISO (if needed)
+  static_ip    - Configure static IP via netplan
   packages     - Install required apt packages
-  directories  - Create TFTP and webroot directories  
-  webroot      - Mount ISO and copy to webroot
+  directories  - Create TFTP and PXE root directories  
+  pxeroot      - Mount ISO and copy to PXE root
   bootloaders  - Download syslinux and UEFI bootloaders
   tftp         - Populate TFTP with boot files
   nfs          - Configure NFS exports
   pxelinux     - Write PXELINUX config (BIOS)
   grub         - Write GRUB config (UEFI)
   dnsmasq      - Configure dnsmasq (DHCP/TFTP)
-  nginx        - Configure nginx web server
   kiosk        - Customize squashfs for kiosk mode
   services     - Enable and start services
 
@@ -1873,6 +2080,13 @@ parse_args() {
                 ENABLE_KIOSK=false
                 shift
                 ;;
+            --interface)
+                if [[ -z "${2:-}" ]]; then
+                    abort "Option $1 requires an interface name (e.g., eth0, enp3s0)"
+                fi
+                NETWORK_INTERFACE="$2"
+                shift 2
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -1912,6 +2126,15 @@ parse_args() {
             -v|--verbose)
                 VERBOSE=true
                 LOG_LEVEL=DEBUG
+                shift
+                ;;
+            --kiosk-debug)
+                # Disable all kiosk lockdown for debugging
+                KIOSK_BLOCK_KEYS=false
+                KIOSK_DISABLE_SHORTCUTS=false
+                KIOSK_WAIT_GNOME=false
+                KIOSK_ENABLE_XBINDKEYS=false
+                info "Kiosk debug mode: all lockdown options disabled"
                 shift
                 ;;
             -y|--yes)
@@ -1963,16 +2186,17 @@ validate_step_name() {
 get_step_function() {
     local step="$1"
     case "$step" in
+        iso_download) echo "download_iso" ;;
+        static_ip)   echo "configure_network" ;;
         packages)    echo "install_packages" ;;
         directories) echo "prepare_directories" ;;
-        webroot)     echo "mount_and_populate_webroot" ;;
+        pxeroot)     echo "mount_and_populate_pxeroot" ;;
         bootloaders) echo "download_and_extract_bootloaders" ;;
         tftp)        echo "populate_tftp_files" ;;
         nfs)         echo "configure_nfs_exports" ;;
         pxelinux)    echo "write_pxelinux_cfg" ;;
         grub)        echo "write_grub_cfg" ;;
         dnsmasq)     echo "write_dnsmasq_config" ;;
-        nginx)       echo "configure_nginx_site" ;;
         kiosk)       echo "perform_kiosk_customization" ;;
         services)    echo "restart_services" ;;
         *) abort "Unknown step: $step" ;;
@@ -2029,7 +2253,7 @@ show_summary() {
     info "  Server Configuration:"
     info "    • IP Address:   $SERVER_IP"
     info "    • TFTP Root:    $TFTP_ROOT"
-    info "    • HTTP Root:    $PXE_WEBROOT"
+    info "    • HTTP Root:    $PXE_ROOT"
     info "    • DHCP Range:   $DHCP_RANGE_START - $DHCP_RANGE_END"
     info ""
     info "  Client Networks:  ${NFS_CLIENT_NETS[*]}"

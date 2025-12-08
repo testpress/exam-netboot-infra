@@ -16,17 +16,17 @@ perform_kiosk_customization() {
     info "Performing kiosk customization..."
     
     # Find squashfs file
-    local squash="$PXE_WEBROOT/casper/filesystem.squashfs"
+    local squash="$PXE_ROOT/casper/filesystem.squashfs"
     
     # Try alternate name if primary not found
     if [[ ! -f "$squash" ]]; then
-        squash="$PXE_WEBROOT/casper/minimal.squashfs"
+        squash="$PXE_ROOT/casper/minimal.squashfs"
     fi
     
     if [[ ! -f "$squash" ]]; then
         warn "squashfs not found - skipping kiosk customization"
-        warn "Looked for: $PXE_WEBROOT/casper/filesystem.squashfs"
-        warn "        and: $PXE_WEBROOT/casper/minimal.squashfs"
+        warn "Looked for: $PXE_ROOT/casper/filesystem.squashfs"
+        warn "        and: $PXE_ROOT/casper/minimal.squashfs"
         return 0
     fi
     
@@ -97,7 +97,7 @@ _inject_kiosk_autostart() {
     local autostart_path="$profile_dir/99-kiosk-autostart.sh"
     info "Injecting kiosk autostart script..."
     
-    # Create the autostart script
+    # Create the autostart script with configurable options
     cat > "$autostart_path" <<KIOSK_SCRIPT
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -110,6 +110,15 @@ KIOSK_URL="${KIOSK_URL}"
 KIOSK_SSID="${KIOSK_SSID:-}"
 KIOSK_PASSWORD="${KIOSK_PASSWORD:-}"
 
+# Configurable lockdown options
+KIOSK_BLOCK_KEYS="${KIOSK_BLOCK_KEYS:-true}"
+KIOSK_DISABLE_SHORTCUTS="${KIOSK_DISABLE_SHORTCUTS:-true}"
+KIOSK_WAIT_GNOME="${KIOSK_WAIT_GNOME:-true}"
+KIOSK_ENABLE_XBINDKEYS="${KIOSK_ENABLE_XBINDKEYS:-true}"
+
+LOG="/tmp/kiosk-autostart.log"
+echo "\$(date -Iseconds) Kiosk script start" >> "\$LOG"
+
 # Only run in graphical session
 [ -z "\$DISPLAY" ] && exit 0
 
@@ -119,20 +128,47 @@ LOCKFILE="/tmp/.kiosk-started-\$USER"
 touch "\$LOCKFILE"
 
 # ───────────────────────────────────────────────────────────────────────────────
+# Wait for GNOME Session (configurable)
+# ───────────────────────────────────────────────────────────────────────────────
+
+wait_for_gnome() {
+    if [ "\$KIOSK_WAIT_GNOME" != "true" ]; then
+        sleep 3
+        return
+    fi
+    
+    echo "\$(date -Iseconds) Waiting for GNOME session..." >> "\$LOG"
+    local attempts=0
+    while ! gsettings list-schemas >/dev/null 2>&1; do
+        sleep 1
+        attempts=\$((attempts + 1))
+        [ \$attempts -gt 30 ] && break
+    done
+    echo "\$(date -Iseconds) GNOME session ready (or timeout)" >> "\$LOG"
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
 # WiFi Connection (if configured)
 # ───────────────────────────────────────────────────────────────────────────────
 
 connect_wifi() {
     if [ -n "\$KIOSK_SSID" ] && [ -n "\$KIOSK_PASSWORD" ]; then
+        echo "\$(date -Iseconds) Connecting to WiFi: \$KIOSK_SSID" >> "\$LOG"
         nmcli device wifi connect "\$KIOSK_SSID" password "\$KIOSK_PASSWORD" 2>/dev/null || true
     fi
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Disable GNOME Shortcuts
+# Disable GNOME Shortcuts (configurable)
 # ───────────────────────────────────────────────────────────────────────────────
 
 disable_shortcuts() {
+    if [ "\$KIOSK_DISABLE_SHORTCUTS" != "true" ]; then
+        echo "\$(date -Iseconds) Skipping shortcut disable (debug mode)" >> "\$LOG"
+        return
+    fi
+    
+    echo "\$(date -Iseconds) Disabling GNOME shortcuts" >> "\$LOG"
     gsettings set org.gnome.desktop.wm.keybindings toggle-fullscreen "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]" 2>/dev/null || true
@@ -142,10 +178,56 @@ disable_shortcuts() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
+# Block Keys (configurable) - F1-F12, Super, Ctrl+Q, etc.
+# ───────────────────────────────────────────────────────────────────────────────
+
+block_keys() {
+    if [ "\$KIOSK_BLOCK_KEYS" != "true" ]; then
+        echo "\$(date -Iseconds) Skipping key blocking (debug mode)" >> "\$LOG"
+        return
+    fi
+    
+    echo "\$(date -Iseconds) Blocking dangerous keys" >> "\$LOG"
+    # Block F1-F12 (keycodes 67-76, 95-96), Super (133-134)
+    for keycode in 67 68 69 70 71 72 73 74 75 76 95 96 133 134; do
+        xmodmap -e "keycode \$keycode = NoSymbol" 2>/dev/null || true
+    done
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
+# xbindkeys Reload Shortcut (Ctrl+Alt+R)
+# ───────────────────────────────────────────────────────────────────────────────
+
+setup_reload_shortcut() {
+    if [ "\$KIOSK_ENABLE_XBINDKEYS" != "true" ]; then
+        echo "\$(date -Iseconds) Skipping xbindkeys (debug mode)" >> "\$LOG"
+        return
+    fi
+    
+    local kiosk_dir="/home/\$KIOSK_USER/.kiosk"
+    mkdir -p "\$kiosk_dir"
+    
+    # Create xbindkeys config
+    cat > "\$kiosk_dir/.xbindkeysrc" <<XBIND
+# Reload Firefox (Ctrl + Alt + R)
+"pkill -u \$KIOSK_USER firefox; sleep 0.5; firefox --kiosk --private-window '\$KIOSK_URL' --new-instance &"
+  control+alt + r
+XBIND
+    
+    chown -R "\$KIOSK_USER:\$KIOSK_USER" "\$kiosk_dir"
+    
+    # Start xbindkeys
+    pkill -u "\$KIOSK_USER" xbindkeys 2>/dev/null || true
+    xbindkeys -f "\$kiosk_dir/.xbindkeysrc" &
+    echo "\$(date -Iseconds) xbindkeys started (Ctrl+Alt+R to reload)" >> "\$LOG"
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
 # Prevent Screen Sleep
 # ───────────────────────────────────────────────────────────────────────────────
 
 prevent_sleep() {
+    echo "\$(date -Iseconds) Disabling screen sleep" >> "\$LOG"
     xset s off 2>/dev/null || true
     xset -dpms 2>/dev/null || true
     xset s noblank 2>/dev/null || true
@@ -154,30 +236,52 @@ prevent_sleep() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Launch Firefox in Kiosk Mode
+# Install and Enable Firefox Systemd User Service (auto-restart)
 # ───────────────────────────────────────────────────────────────────────────────
 
-launch_firefox() {
-    # Kill any existing Firefox instances
-    pkill -u "\$USER" firefox 2>/dev/null || true
-    sleep 0.5
+setup_firefox_service() {
+    local service_dir="/home/\$KIOSK_USER/.config/systemd/user"
+    mkdir -p "\$service_dir"
     
-    # Launch in kiosk mode
-    export MOZ_NO_REMOTE=1
-    firefox --kiosk --private-window "\$KIOSK_URL" --new-instance &
+    cat > "\$service_dir/firefox-kiosk.service" <<SYSTEMD
+[Unit]
+Description=Firefox Kiosk Mode
+After=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/firefox --kiosk --private-window \$KIOSK_URL --new-instance
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+SYSTEMD
+    
+    chown -R "\$KIOSK_USER:\$KIOSK_USER" "/home/\$KIOSK_USER/.config"
+    
+    # Enable and start the service
+    sudo -u "\$KIOSK_USER" systemctl --user daemon-reload 2>/dev/null || true
+    sudo -u "\$KIOSK_USER" systemctl --user enable firefox-kiosk.service 2>/dev/null || true
+    sudo -u "\$KIOSK_USER" systemctl --user start firefox-kiosk.service 2>/dev/null || true
+    
+    echo "\$(date -Iseconds) Firefox systemd service enabled (auto-restart)" >> "\$LOG"
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Main
 # ───────────────────────────────────────────────────────────────────────────────
 
-# Wait for desktop to fully load
-sleep 3
-
+wait_for_gnome
 connect_wifi
 disable_shortcuts
+block_keys
+setup_reload_shortcut
 prevent_sleep
-launch_firefox
+setup_firefox_service
+
+echo "\$(date -Iseconds) Kiosk setup complete" >> "\$LOG"
 KIOSK_SCRIPT
 
     chmod +x "$autostart_path"

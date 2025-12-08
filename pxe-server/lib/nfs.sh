@@ -11,7 +11,7 @@ configure_nfs_exports() {
     if [[ "${DRY_RUN:-false}" == true ]]; then
         info "[DRY-RUN] Would configure NFS exports in $NFS_EXPORTS:"
         for net in "${NFS_CLIENT_NETS[@]}"; do
-            info "  $PXE_WEBROOT $net(ro,sync,no_subtree_check)"
+            info "  $PXE_ROOT $net(ro,sync,no_subtree_check)"
         done
         return 0
     fi
@@ -32,14 +32,14 @@ configure_nfs_exports() {
     
     local added=0
     for net in "${NFS_CLIENT_NETS[@]}"; do
-        local entry="$PXE_WEBROOT $net(ro,sync,no_subtree_check)"
+        local entry="$PXE_ROOT $net(ro,sync,no_subtree_check)"
         
         # Check if entry already exists
         if grep -qxF "$entry" "$NFS_EXPORTS" 2>/dev/null; then
             debug "NFS export already exists: $entry"
         else
             echo "$entry" >> "$NFS_EXPORTS"
-            info "Added NFS export: $PXE_WEBROOT for $net"
+            info "Added NFS export: $PXE_ROOT for $net"
             ((added++))
         fi
     done

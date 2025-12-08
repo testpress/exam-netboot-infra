@@ -9,11 +9,11 @@ restart_services() {
     info "Enabling and starting services..."
     
     if [[ "${DRY_RUN:-false}" == true ]]; then
-        info "[DRY-RUN] Would enable and start: nginx, nfs-kernel-server, dnsmasq"
+        info "[DRY-RUN] Would enable and start: nfs-kernel-server, dnsmasq"
         return 0
     fi
     
-    local services=(nginx nfs-kernel-server dnsmasq)
+    local services=(nfs-kernel-server dnsmasq)
     local failed=0
     
     for service in "${services[@]}"; do
@@ -88,7 +88,7 @@ cleanup_workdir() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 show_service_status() {
-    local services=(nginx nfs-kernel-server dnsmasq)
+    local services=(nfs-kernel-server dnsmasq)
     
     info "Service Status:"
     for service in "${services[@]}"; do
@@ -104,7 +104,7 @@ show_service_status() {
 
 # Check all required services are running
 check_all_services() {
-    local services=(nginx nfs-kernel-server dnsmasq)
+    local services=(nfs-kernel-server dnsmasq)
     local failed=0
     
     for service in "${services[@]}"; do
@@ -121,7 +121,6 @@ stop_pxe_services() {
     info "Stopping PXE services..."
     
     systemctl stop dnsmasq 2>/dev/null || true
-    systemctl stop nginx 2>/dev/null || true
     systemctl stop nfs-kernel-server 2>/dev/null || true
     
     log_success "Services stopped"

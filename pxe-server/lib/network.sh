@@ -13,23 +13,44 @@ SERVER_IP=""
 detect_network_interface_and_ip() {
     info "Detecting network configuration..."
     
-    # Find the default route interface
-    DEFAULT_IF="$(ip -o -4 route show to default 2>/dev/null | awk '{print $5}' | head -n1 || true)"
+    # Allow CLI/config override via NETWORK_INTERFACE
+    if [[ -n "${NETWORK_INTERFACE:-}" ]]; then
+        DEFAULT_IF="$NETWORK_INTERFACE"
+        info "Using specified interface: $DEFAULT_IF"
+    else
+        # Try to find an ethernet interface first (prefer eth*, enp*, eno* over wlan*, wlp*)
+        DEFAULT_IF=""
+        
+        # Get all interfaces with IPv4 addresses
+        local interfaces
+        interfaces=$(ip -o -4 addr show | awk '{print $2}' | grep -v '^lo$' | sort -u)
+        
+        # Prefer ethernet over wireless
+        for iface in $interfaces; do
+            # Check if it's an ethernet interface (not wireless)
+            if [[ "$iface" =~ ^(eth|enp|eno|ens) ]]; then
+                DEFAULT_IF="$iface"
+                info "Found ethernet interface: $DEFAULT_IF"
+                break
+            fi
+        done
+        
+        # If no ethernet found, fall back to any interface with an IP
+        if [[ -z "$DEFAULT_IF" ]]; then
+            DEFAULT_IF=$(echo "$interfaces" | head -n1)
+            warn "No ethernet interface found, using: $DEFAULT_IF"
+        fi
+    fi
     
     if [[ -z "$DEFAULT_IF" ]]; then
-        abort "Cannot detect default network interface"
+        abort "Cannot detect network interface. Use --interface <name> to specify manually."
     fi
     
-    # Get the primary IP address
-    SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+    # Get IP address from the selected interface
+    SERVER_IP=$(ip -4 addr show "$DEFAULT_IF" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)
     
     if [[ -z "$SERVER_IP" ]]; then
-        # Fallback: try to get IP from the detected interface
-        SERVER_IP="$(ip -4 addr show "$DEFAULT_IF" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)"
-    fi
-    
-    if [[ -z "$SERVER_IP" ]]; then
-        abort "Cannot determine server IP address"
+        abort "Cannot determine IP address for $DEFAULT_IF. Ensure it has an IP configured."
     fi
     
     info "Network interface: $DEFAULT_IF"

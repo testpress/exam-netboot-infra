@@ -11,7 +11,7 @@ prepare_directories() {
     if [[ "${DRY_RUN:-false}" == true ]]; then
         info "[DRY-RUN] Would create directories:"
         info "  - $WORK_DIR"
-        info "  - $PXE_WEBROOT"
+        info "  - $PXE_ROOT"
         info "  - $TFTP_ROOT/bios"
         info "  - $TFTP_ROOT/boot/casper"
         info "  - $TFTP_ROOT/grub"
@@ -19,7 +19,7 @@ prepare_directories() {
     fi
     
     mkdir -p "$WORK_DIR"
-    mkdir -p "$PXE_WEBROOT"
+    mkdir -p "$PXE_ROOT"
     mkdir -p "$TFTP_ROOT/bios"
     mkdir -p "$TFTP_ROOT/boot/casper"
     mkdir -p "$TFTP_ROOT/grub"
@@ -32,12 +32,12 @@ prepare_directories() {
 # ISO Mounting and Content Population
 # ═══════════════════════════════════════════════════════════════════════════════
 
-mount_and_populate_webroot() {
-    info "Mounting ISO and populating webroot..."
+mount_and_populate_pxeroot() {
+    info "Mounting ISO and populating pxeroot..."
     
     if [[ "${DRY_RUN:-false}" == true ]]; then
         info "[DRY-RUN] Would mount: $ISO_PATH"
-        info "[DRY-RUN] Would rsync to: $PXE_WEBROOT"
+        info "[DRY-RUN] Would rsync to: $PXE_ROOT"
         return 0
     fi
     
@@ -57,25 +57,25 @@ mount_and_populate_webroot() {
     
     # Copy contents to webroot
     info "Copying ISO contents to webroot (this may take a few minutes)..."
-    if ! rsync -a --delete "$mnt/" "$PXE_WEBROOT/"; then
+    if ! rsync -a --delete "$mnt/" "$PXE_ROOT/"; then
         umount "$mnt" 2>/dev/null || true
         abort "Failed to copy ISO contents"
     fi
     
     # Ensure .disk directory is copied (needed for Ubuntu boot)
     if [[ -d "$mnt/.disk" ]]; then
-        rsync -a "$mnt/.disk" "$PXE_WEBROOT/"
+        rsync -a "$mnt/.disk" "$PXE_ROOT/"
     fi
     
     # Unmount
     umount "$mnt"
     
     # Verify critical files exist
-    if [[ ! -f "$PXE_WEBROOT/casper/vmlinuz" ]]; then
+    if [[ ! -f "$PXE_ROOT/casper/vmlinuz" ]]; then
         abort "Kernel not found in ISO - is this a valid Ubuntu Desktop ISO?"
     fi
     
-    if [[ ! -f "$PXE_WEBROOT/casper/initrd" ]]; then
+    if [[ ! -f "$PXE_ROOT/casper/initrd" ]]; then
         abort "Initrd not found in ISO - is this a valid Ubuntu Desktop ISO?"
     fi
     

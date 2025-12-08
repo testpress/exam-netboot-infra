@@ -21,16 +21,17 @@ fi
 
 # All available steps in order
 ALL_STEPS=(
+    iso_download
+    static_ip
     packages
     directories
-    webroot
+    pxeroot
     bootloaders
     tftp
     nfs
     pxelinux
     grub
     dnsmasq
-    nginx
     kiosk
     services
 )
@@ -38,16 +39,17 @@ ALL_STEPS=(
 # Get step description
 get_step_description() {
     case "$1" in
+        iso_download) echo "Download Ubuntu ISO (if needed)" ;;
+        static_ip)   echo "Configure static IP via netplan" ;;
         packages)    echo "Install required apt packages" ;;
-        directories) echo "Create TFTP and webroot directories" ;;
-        webroot)     echo "Mount ISO and copy to webroot" ;;
+        directories) echo "Create TFTP and PXE root directories" ;;
+        pxeroot)     echo "Mount ISO and copy to PXE root" ;;
         bootloaders) echo "Download syslinux and UEFI bootloaders" ;;
         tftp)        echo "Populate TFTP with boot files" ;;
         nfs)         echo "Configure NFS exports" ;;
         pxelinux)    echo "Write PXELINUX config (BIOS)" ;;
         grub)        echo "Write GRUB config (UEFI)" ;;
         dnsmasq)     echo "Configure dnsmasq (DHCP/TFTP)" ;;
-        nginx)       echo "Configure nginx web server" ;;
         kiosk)       echo "Customize squashfs for kiosk mode" ;;
         services)    echo "Enable and start services" ;;
         *)           echo "" ;;
@@ -79,6 +81,7 @@ PXE Server Setup for Ubuntu Exam Kiosk Environment
 OPTIONS:
   -c, --config FILE       Config file path (default: /etc/pxe-server/config.conf)
   -i, --iso PATH          Path to Ubuntu Desktop ISO (required first time)
+  --interface NAME        Network interface for PXE (default: auto-detect ethernet)
   --no-kiosk              Disable kiosk customization
   --dry-run               Show what would be done without executing
   --skip-packages         Skip apt package installation
@@ -93,6 +96,7 @@ STEP CONTROL:
   --step <name>           Run only a single step (useful for debugging)
   --from-step <name>      Resume from a specific step (skip earlier steps)
   --reset                 Clear all progress and start fresh
+  --kiosk-debug           Disable kiosk lockdown (for debugging clients)
 
 EXAMPLES:
   # First-time interactive setup
@@ -120,16 +124,17 @@ EXAMPLES:
   sudo ./install.sh --reset
 
 AVAILABLE STEPS:
+  iso_download - Download Ubuntu ISO (if needed)
+  static_ip    - Configure static IP via netplan
   packages     - Install required apt packages
-  directories  - Create TFTP and webroot directories  
-  webroot      - Mount ISO and copy to webroot
+  directories  - Create TFTP and PXE root directories  
+  pxeroot      - Mount ISO and copy to PXE root
   bootloaders  - Download syslinux and UEFI bootloaders
   tftp         - Populate TFTP with boot files
   nfs          - Configure NFS exports
   pxelinux     - Write PXELINUX config (BIOS)
   grub         - Write GRUB config (UEFI)
   dnsmasq      - Configure dnsmasq (DHCP/TFTP)
-  nginx        - Configure nginx web server
   kiosk        - Customize squashfs for kiosk mode
   services     - Enable and start services
 
@@ -214,6 +219,13 @@ parse_args() {
                 ENABLE_KIOSK=false
                 shift
                 ;;
+            --interface)
+                if [[ -z "${2:-}" ]]; then
+                    abort "Option $1 requires an interface name (e.g., eth0, enp3s0)"
+                fi
+                NETWORK_INTERFACE="$2"
+                shift 2
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -253,6 +265,15 @@ parse_args() {
             -v|--verbose)
                 VERBOSE=true
                 LOG_LEVEL=DEBUG
+                shift
+                ;;
+            --kiosk-debug)
+                # Disable all kiosk lockdown for debugging
+                KIOSK_BLOCK_KEYS=false
+                KIOSK_DISABLE_SHORTCUTS=false
+                KIOSK_WAIT_GNOME=false
+                KIOSK_ENABLE_XBINDKEYS=false
+                info "Kiosk debug mode: all lockdown options disabled"
                 shift
                 ;;
             -y|--yes)
@@ -304,16 +325,17 @@ validate_step_name() {
 get_step_function() {
     local step="$1"
     case "$step" in
+        iso_download) echo "download_iso" ;;
+        static_ip)   echo "configure_network" ;;
         packages)    echo "install_packages" ;;
         directories) echo "prepare_directories" ;;
-        webroot)     echo "mount_and_populate_webroot" ;;
+        pxeroot)     echo "mount_and_populate_pxeroot" ;;
         bootloaders) echo "download_and_extract_bootloaders" ;;
         tftp)        echo "populate_tftp_files" ;;
         nfs)         echo "configure_nfs_exports" ;;
         pxelinux)    echo "write_pxelinux_cfg" ;;
         grub)        echo "write_grub_cfg" ;;
         dnsmasq)     echo "write_dnsmasq_config" ;;
-        nginx)       echo "configure_nginx_site" ;;
         kiosk)       echo "perform_kiosk_customization" ;;
         services)    echo "restart_services" ;;
         *) abort "Unknown step: $step" ;;
@@ -370,7 +392,7 @@ show_summary() {
     info "  Server Configuration:"
     info "    • IP Address:   $SERVER_IP"
     info "    • TFTP Root:    $TFTP_ROOT"
-    info "    • HTTP Root:    $PXE_WEBROOT"
+    info "    • HTTP Root:    $PXE_ROOT"
     info "    • DHCP Range:   $DHCP_RANGE_START - $DHCP_RANGE_END"
     info ""
     info "  Client Networks:  ${NFS_CLIENT_NETS[*]}"

@@ -23,7 +23,7 @@ echo "════════════════════════�
 echo ""
 
 # Verify all required files exist
-REQUIRED_LIBS=(logging config preflight network packages iso bootloaders nfs dnsmasq nginx kiosk services)
+REQUIRED_LIBS=(logging config preflight network network_static iso_download packages iso bootloaders nfs dnsmasq kiosk services)
 missing=0
 for lib in "${REQUIRED_LIBS[@]}"; do
     if [[ ! -f "$LIB_DIR/${lib}.sh" ]]; then

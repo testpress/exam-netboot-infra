@@ -26,8 +26,9 @@ ISO_PATH="/root/ubuntu-24.04.3-desktop-amd64.iso"
 # Temporary work directory (will be cleaned up after install)
 WORK_DIR="/root/pxe_work"
 
-# Web server root for PXE files (ISO contents)
-PXE_WEBROOT="/var/www/html/desktop/u2404"
+# PXE root directory (NFS-served Ubuntu filesystem)
+# This is the standard Linux FHS path for service data
+PXE_ROOT="/srv/pxe/u2404"
 
 # TFTP root directory for boot files
 TFTP_ROOT="/tftp"

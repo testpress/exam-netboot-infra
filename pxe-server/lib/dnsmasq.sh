@@ -38,13 +38,12 @@ domain=pxe.local
 # ───────────────────────────────────────────────────────────────────────────────
 dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},${DHCP_NETMASK},${DHCP_LEASE}
 
-# Gateway (option 3) and DNS (option 6)
+# Gateway (option 3) and DNS (option 6) - both point to PXE server
 dhcp-option=3,$SERVER_IP
 dhcp-option=6,$SERVER_IP
 
-# Upstream DNS
-server=8.8.8.8
-server=8.8.4.4
+# No upstream DNS - clients are isolated and only access NFS
+# (PXE server can use its own DNS for setup purposes)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # TFTP Configuration
@@ -116,7 +115,7 @@ LABEL ubuntu
     MENU LABEL Ubuntu 24.04 Desktop (NFS Boot)
     MENU DEFAULT
     KERNEL /boot/casper/vmlinuz
-    APPEND initrd=/boot/casper/initrd boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_WEBROOT ip=dhcp quiet splash ---
+    APPEND initrd=/boot/casper/initrd boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_ROOT ip=dhcp quiet splash ---
 EOF
     
     log_success "PXELINUX configuration written"
@@ -150,12 +149,12 @@ set menu_color_normal=white/black
 set menu_color_highlight=black/light-gray
 
 menuentry "Ubuntu 24.04 Desktop (NFS Boot)" {
-    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_WEBROOT ip=dhcp quiet splash ---
+    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_ROOT ip=dhcp quiet splash ---
     initrd /boot/casper/initrd
 }
 
 menuentry "Ubuntu 24.04 Desktop (NFS Boot - Safe Mode)" {
-    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_WEBROOT ip=dhcp nomodeset
+    linux /boot/casper/vmlinuz boot=casper netboot=nfs nfsroot=$SERVER_IP:$PXE_ROOT ip=dhcp nomodeset
     initrd /boot/casper/initrd
 }
 EOF
