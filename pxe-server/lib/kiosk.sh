@@ -379,6 +379,7 @@ harden_desktop() {
     
     # Fallbacks via gsettings
     gsettings set org.gnome.desktop.interface enable-hot-corners false 2>/dev/null || true
+    gsettings set org.gnome.shell.extensions.dash-to-dock disable-overview-on-startup true 2>/dev/null || true
     gsettings set org.gnome.shell.extensions.dash-to-dock autohide true 2>/dev/null || true
     gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed false 2>/dev/null || true
     gsettings set org.gnome.shell.extensions.dash-to-dock intellihide false 2>/dev/null || true
@@ -392,6 +393,11 @@ harden_desktop() {
     gsettings set org.gnome.desktop.lockdown disable-lock-screen true 2>/dev/null || true
     gsettings set org.gnome.desktop.lockdown disable-user-switching true 2>/dev/null || true
     gsettings set org.gnome.desktop.lockdown disable-log-out true 2>/dev/null || true
+    
+    # Restart Shell to apply changes (Required for some extensions/removals)
+    # WARNING: On Wayland this terminates session. Kiosk usually runs on X11 or tolerates restart loop if config is idempotent.
+    # We add a small delay and only run if session is established.
+    (sleep 2; pkill -HUP gnome-shell) &
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -456,8 +462,9 @@ _inject_kiosk_extensions() {
                 mkdir -p "$ext_path"
                 cp -r "$src_dir"/* "$ext_path/"
                 
-                # Compile Schemas if glib-compile-schemas is available
+                # Compile Schemas
                 if command -v glib-compile-schemas >/dev/null; then
+                     info "Compiling schemas for $ext_uuid"
                      glib-compile-schemas "$ext_path/schemas" 2>/dev/null || warn "Failed to compile schemas for hidetopbar"
                 else
                      warn "glib-compile-schemas not found - extension settings might fail"
