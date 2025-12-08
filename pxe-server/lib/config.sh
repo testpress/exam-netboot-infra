@@ -31,7 +31,7 @@ NFS_CLIENT_NETS=()
 # Kiosk Settings
 ENABLE_KIOSK="${ENABLE_KIOSK:-true}"
 KIOSK_USER="${KIOSK_USER:-ubuntu}"
-KIOSK_URL="${KIOSK_URL:-https://lmsdemo.testpress.in}"
+KIOSK_URL="${KIOSK_URL:-http://10.0.0.1}"
 KIOSK_SSID="${KIOSK_SSID:-}"
 KIOSK_PASSWORD="${KIOSK_PASSWORD:-}"
 

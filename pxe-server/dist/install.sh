@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T10:04:33Z"
+readonly BUILD_DATE="2025-12-08T10:41:30Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1082,9 +1082,9 @@ populate_tftp_files() {
     
     info "Copying UEFI boot files..."
     
-    # Find and copy shimx64.efi (handle different paths/versions)
+    # Find and copy shimx64.efi (handle different paths/versions like .signed.latest)
     local shim_file
-    shim_file=$(find "$WORK_DIR" -name "shimx64.efi.signed" -o -name "shimx64.efi" | head -n 1)
+    shim_file=$(find "$WORK_DIR" -name "shimx64.efi*" | grep -v "grub" | head -n 1)
     
     if [[ -f "$shim_file" ]]; then
         # Manual says: /tftp/grub/bootx64.efi
@@ -1098,7 +1098,7 @@ populate_tftp_files() {
     
     # Find and copy grubnetx64.efi
     local grub_file
-    grub_file=$(find "$WORK_DIR" -name "grubnetx64.efi.signed" -o -name "grubnetx64.efi" | head -n 1)
+    grub_file=$(find "$WORK_DIR" -name "grubnetx64.efi*" | head -n 1)
     
     if [[ -f "$grub_file" ]]; then
         # Manual says: /tftp/grubx64.efi
@@ -1140,6 +1140,9 @@ populate_tftp_files() {
     # ─────────────────────────────────────────────────────────────────────────
     
     ln -sfn /tftp/boot /tftp/bios/boot 2>/dev/null || true
+    
+    # Ensure permissions (dnsmasq might run as non-root)
+    chmod -R 755 "$TFTP_ROOT"
     
     log_success "TFTP directory populated"
 }
