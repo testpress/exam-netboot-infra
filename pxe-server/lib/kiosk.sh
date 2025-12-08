@@ -241,30 +241,88 @@ block_keys() {
 # xbindkeys Reload Shortcut (Ctrl+Alt+R)
 # ───────────────────────────────────────────────────────────────────────────────
 
-setup_reload_shortcut() {
-    if [ "\$KIOSK_ENABLE_XBINDKEYS" != "true" ]; then
-        echo "\$(date -Iseconds) Skipping reload shortcut (debug mode)" >> "\$LOG"
-        return
-    fi
+# ───────────────────────────────────────────────────────────────────────────────
+# Setup Shortcuts (Reload + Blocking)
+# ───────────────────────────────────────────────────────────────────────────────
+
+setup_shortcuts() {
+    echo "\$(date -Iseconds) Setting up GNOME shortcuts" >> "\$LOG"
     
-    echo "\$(date -Iseconds) Setting up Ctrl+Alt+R reload shortcut (GNOME)" >> "\$LOG"
+    local path_base="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
     
-    # Create the reload script
-    local reload_script="/home/\$KIOSK_USER/kiosk_reload.sh"
-    cat > "\$reload_script" <<RELOAD_SCRIPT
+    # Define paths for custom shortcuts
+    local p0="\$path_base/custom0/" # Reload
+    local p1="\$path_base/custom1/" # Block Ctrl+Q
+    local p2="\$path_base/custom2/" # Block Ctrl+W
+    local p3="\$path_base/custom3/" # Block Ctrl+T
+    local p4="\$path_base/custom4/" # Block Ctrl+Shift+I (Inspector)
+    local p5="\$path_base/custom5/" # Block F12 (DevTools)
+    
+    # 1. Reload Shortcut (Ctrl+Alt+R)
+    local reload_cmd="/bin/true"
+    local reload_bind=""
+    
+    if [ "\$KIOSK_ENABLE_XBINDKEYS" == "true" ]; then
+        local reload_script="/home/\$KIOSK_USER/kiosk_reload.sh"
+        cat > "\$reload_script" <<RELOAD
 #!/bin/bash
 pkill -u \$KIOSK_USER firefox; sleep 0.5; firefox --kiosk --private-window '\$KIOSK_URL' --new-instance &
-RELOAD_SCRIPT
-    chmod +x "\$reload_script"
-    chown "\$KIOSK_USER:\$KIOSK_USER" "\$reload_script"
+RELOAD
+        chmod +x "\$reload_script"
+        chown "\$KIOSK_USER:\$KIOSK_USER" "\$reload_script"
+        
+        reload_cmd="\$reload_script"
+        reload_bind="<Control><Alt>r"
+    fi
     
-    # Configure GNOME custom keybinding
-    local key_path="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/"
+    # 2. Blocking Ctrl+Q / Ctrl+W / Ctrl+T / Inspector
+    local block_bind_q=""
+    local block_bind_w=""
+    local block_bind_t=""
+    local block_bind_i=""
+    local block_bind_f12=""
     
-    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['\$key_path']" 2>/dev/null || true
-    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$key_path name 'Kiosk Reload' 2>/dev/null || true
-    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$key_path command "\$reload_script" 2>/dev/null || true
-    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$key_path binding '<Control><Alt>r' 2>/dev/null || true
+    if [ "\$KIOSK_BLOCK_KEYS" == "true" ]; then
+        block_bind_q="<Control>q"
+        block_bind_w="<Control>w"
+        block_bind_t="<Control>t"
+        block_bind_i="<Control><Shift>i"
+        block_bind_f12="F12"
+    fi
+    
+    # Apply Settings
+    # Register the list of custom bindings
+    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['\$p0', '\$p1', '\$p2', '\$p3', '\$p4', '\$p5']" 2>/dev/null || true
+    
+    # Configure Reload
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p0 name 'Kiosk Reload'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p0 command "\$reload_cmd"
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p0 binding "\$reload_bind"
+    
+    # Configure Block Q
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p1 name 'Block Ctrl-Q'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p1 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p1 binding "\$block_bind_q"
+    
+    # Configure Block W
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p2 name 'Block Ctrl-W'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p2 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p2 binding "\$block_bind_w"
+
+    # Configure Block Ctrl+T
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p3 name 'Block Ctrl-T'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p3 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p3 binding "\$block_bind_t"
+    
+    # Configure Block Inspector (Ctrl+Shift+I)
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p4 name 'Block Inspector'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p4 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p4 binding "\$block_bind_i"
+    
+    # Configure Block F12
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p5 name 'Block F12'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p5 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p5 binding "\$block_bind_f12"
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -288,7 +346,7 @@ wait_for_gnome
 connect_wifi
 disable_shortcuts
 block_keys
-setup_reload_shortcut
+setup_shortcuts
 prevent_sleep
 
 echo "\$(date -Iseconds) Kiosk setup complete" >> "\$LOG"
@@ -314,6 +372,7 @@ _inject_kiosk_policies() {
 {
     "policies": {
         "DisableAppUpdate": true,
+        "DisableDeveloperTools": true,
         "DisableFormHistory": true,
         "DisablePasswordReveal": true,
         "DisablePocket": true,
