@@ -11,11 +11,48 @@ VERBOSE=false
 SKIP_PACKAGES=false
 FORCE_REINSTALL=false
 INTERACTIVE=true
+RUN_SINGLE_STEP=""
+FROM_STEP=""
 
 # Detect if running via pipe (curl | bash)
 if [[ ! -t 0 ]]; then
     INTERACTIVE=false
 fi
+
+# All available steps in order
+ALL_STEPS=(
+    packages
+    directories
+    webroot
+    bootloaders
+    tftp
+    nfs
+    pxelinux
+    grub
+    dnsmasq
+    nginx
+    kiosk
+    services
+)
+
+# Get step description
+get_step_description() {
+    case "$1" in
+        packages)    echo "Install required apt packages" ;;
+        directories) echo "Create TFTP and webroot directories" ;;
+        webroot)     echo "Mount ISO and copy to webroot" ;;
+        bootloaders) echo "Download syslinux and UEFI bootloaders" ;;
+        tftp)        echo "Populate TFTP with boot files" ;;
+        nfs)         echo "Configure NFS exports" ;;
+        pxelinux)    echo "Write PXELINUX config (BIOS)" ;;
+        grub)        echo "Write GRUB config (UEFI)" ;;
+        dnsmasq)     echo "Configure dnsmasq (DHCP/TFTP)" ;;
+        nginx)       echo "Configure nginx web server" ;;
+        kiosk)       echo "Customize squashfs for kiosk mode" ;;
+        services)    echo "Enable and start services" ;;
+        *)           echo "" ;;
+    esac
+}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Banner and Help
@@ -51,6 +88,12 @@ OPTIONS:
   -h, --help              Show this help message
   --version               Show version information
 
+STEP CONTROL:
+  --list-steps            List all steps and their completion status
+  --step <name>           Run only a single step (useful for debugging)
+  --from-step <name>      Resume from a specific step (skip earlier steps)
+  --reset                 Clear all progress and start fresh
+
 EXAMPLES:
   # First-time interactive setup
   sudo ./install.sh --iso /root/ubuntu-24.04.3-desktop-amd64.iso
@@ -61,11 +104,34 @@ EXAMPLES:
   # Dry-run to preview changes
   sudo ./install.sh --dry-run --verbose
 
-  # Re-run with existing config
-  sudo ./install.sh -c /etc/pxe-server/config.conf
+  # Check which steps are complete
+  sudo ./install.sh --list-steps
+
+  # Run only the kiosk step
+  sudo ./install.sh --step kiosk
+
+  # Resume from dnsmasq step (skip packages, directories, etc.)
+  sudo ./install.sh --from-step dnsmasq
 
   # Force re-run all steps
   sudo ./install.sh --force
+
+  # Reset all progress and start fresh
+  sudo ./install.sh --reset
+
+AVAILABLE STEPS:
+  packages     - Install required apt packages
+  directories  - Create TFTP and webroot directories  
+  webroot      - Mount ISO and copy to webroot
+  bootloaders  - Download syslinux and UEFI bootloaders
+  tftp         - Populate TFTP with boot files
+  nfs          - Configure NFS exports
+  pxelinux     - Write PXELINUX config (BIOS)
+  grub         - Write GRUB config (UEFI)
+  dnsmasq      - Configure dnsmasq (DHCP/TFTP)
+  nginx        - Configure nginx web server
+  kiosk        - Customize squashfs for kiosk mode
+  services     - Enable and start services
 
 ENVIRONMENT VARIABLES:
   ISO_PATH                Path to Ubuntu ISO
@@ -79,6 +145,48 @@ CONFIGURATION:
   See documentation for all available options.
 
 HELP_EOF
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step Listing
+# ═══════════════════════════════════════════════════════════════════════════════
+
+list_steps() {
+    load_config 2>/dev/null || true
+    init_state 2>/dev/null || true
+    
+    echo ""
+    echo "Installation Steps:"
+    echo "─────────────────────────────────────────────────────────────────"
+    printf "  %-3s %-15s %s\n" "#" "STEP" "STATUS"
+    echo "─────────────────────────────────────────────────────────────────"
+    
+    local i=1
+    for step in "${ALL_STEPS[@]}"; do
+        local status
+        local desc
+        desc=$(get_step_description "$step")
+        
+        if is_step_complete "$step" 2>/dev/null; then
+            status="✅ complete"
+        else
+            status="⬚ pending"
+        fi
+        
+        printf "  %-3d %-15s %-12s  %s\n" "$i" "$step" "$status" "$desc"
+        ((i++))
+    done
+    
+    echo "─────────────────────────────────────────────────────────────────"
+    echo ""
+    echo "State file: ${STATE_FILE:-/var/lib/pxe-setup/completed_steps}"
+    echo ""
+    echo "Usage:"
+    echo "  --step <name>       Run single step"
+    echo "  --from-step <name>  Resume from step"
+    echo "  --force             Re-run completed steps"
+    echo "  --reset             Clear all progress"
+    echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -118,6 +226,30 @@ parse_args() {
                 FORCE_REINSTALL=true
                 shift
                 ;;
+            --list-steps)
+                list_steps
+                exit 0
+                ;;
+            --step)
+                if [[ -z "${2:-}" ]]; then
+                    abort "Option $1 requires a step name"
+                fi
+                RUN_SINGLE_STEP="$2"
+                shift 2
+                ;;
+            --from-step)
+                if [[ -z "${2:-}" ]]; then
+                    abort "Option $1 requires a step name"
+                fi
+                FROM_STEP="$2"
+                shift 2
+                ;;
+            --reset)
+                load_config 2>/dev/null || true
+                reset_state
+                echo "Progress reset. Run again to start fresh."
+                exit 0
+                ;;
             -v|--verbose)
                 VERBOSE=true
                 LOG_LEVEL=DEBUG
@@ -153,6 +285,39 @@ parse_args() {
                 ;;
         esac
     done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step Validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+validate_step_name() {
+    local step="$1"
+    for s in "${ALL_STEPS[@]}"; do
+        if [[ "$s" == "$step" ]]; then
+            return 0
+        fi
+    done
+    abort "Unknown step: $step. Use --list-steps to see available steps."
+}
+
+get_step_function() {
+    local step="$1"
+    case "$step" in
+        packages)    echo "install_packages" ;;
+        directories) echo "prepare_directories" ;;
+        webroot)     echo "mount_and_populate_webroot" ;;
+        bootloaders) echo "download_and_extract_bootloaders" ;;
+        tftp)        echo "populate_tftp_files" ;;
+        nfs)         echo "configure_nfs_exports" ;;
+        pxelinux)    echo "write_pxelinux_cfg" ;;
+        grub)        echo "write_grub_cfg" ;;
+        dnsmasq)     echo "write_dnsmasq_config" ;;
+        nginx)       echo "configure_nginx_site" ;;
+        kiosk)       echo "perform_kiosk_customization" ;;
+        services)    echo "restart_services" ;;
+        *) abort "Unknown step: $step" ;;
+    esac
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -265,6 +430,26 @@ main() {
     trap cleanup_workdir EXIT
     
     # ─────────────────────────────────────────────────────────────────────────
+    # Single step mode
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if [[ -n "$RUN_SINGLE_STEP" ]]; then
+        validate_step_name "$RUN_SINGLE_STEP"
+        local func
+        func=$(get_step_function "$RUN_SINGLE_STEP")
+        
+        log_separator
+        info "Running single step: $RUN_SINGLE_STEP"
+        log_separator
+        
+        run_step "$RUN_SINGLE_STEP" "$func"
+        
+        log_success "Step '$RUN_SINGLE_STEP' completed!"
+        info "Use --list-steps to see overall progress."
+        return 0
+    fi
+    
+    # ─────────────────────────────────────────────────────────────────────────
     # Execute installation steps
     # ─────────────────────────────────────────────────────────────────────────
     
@@ -272,18 +457,28 @@ main() {
     info "Starting PXE server installation..."
     log_separator
     
-    run_step "packages"       install_packages
-    run_step "directories"    prepare_directories
-    run_step "webroot"        mount_and_populate_webroot
-    run_step "bootloaders"    download_and_extract_bootloaders
-    run_step "tftp"           populate_tftp_files
-    run_step "nfs"            configure_nfs_exports
-    run_step "pxelinux"       write_pxelinux_cfg
-    run_step "grub"           write_grub_cfg
-    run_step "dnsmasq"        write_dnsmasq_config
-    run_step "nginx"          configure_nginx_site
-    run_step "kiosk"          perform_kiosk_customization
-    run_step "services"       restart_services
+    local skip_until_found=false
+    if [[ -n "$FROM_STEP" ]]; then
+        validate_step_name "$FROM_STEP"
+        skip_until_found=true
+        info "Resuming from step: $FROM_STEP"
+    fi
+    
+    for step in "${ALL_STEPS[@]}"; do
+        # Handle --from-step
+        if [[ "$skip_until_found" == true ]]; then
+            if [[ "$step" == "$FROM_STEP" ]]; then
+                skip_until_found=false
+            else
+                log_skip "Skipping $step (before --from-step)"
+                continue
+            fi
+        fi
+        
+        local func
+        func=$(get_step_function "$step")
+        run_step "$step" "$func"
+    done
     
     # ─────────────────────────────────────────────────────────────────────────
     # Show summary
