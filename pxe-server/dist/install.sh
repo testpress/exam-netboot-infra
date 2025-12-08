@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T13:06:09Z"
+readonly BUILD_DATE="2025-12-08T13:17:50Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1884,8 +1884,10 @@ _inject_kiosk_extensions() {
         if wget -qO "$tmp_ext/extension.zip" "https://github.com/tuxor1337/hidetopbar/archive/refs/heads/master.zip"; then
             unzip -q "$tmp_ext/extension.zip" -d "$tmp_ext"
             
-            local src_dir="$tmp_ext/hidetopbar-master"
-            if [ -d "$src_dir" ]; then
+            # Dynamically find the extracted directory (e.g. hidetopbar-master)
+            local src_dir=$(find "$tmp_ext" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+            
+            if [ -n "$src_dir" ] && [ -d "$src_dir" ]; then
                 mkdir -p "$ext_path"
                 cp -r "$src_dir"/* "$ext_path/"
                 
@@ -1898,7 +1900,7 @@ _inject_kiosk_extensions() {
                 
                 debug "Installed Hide Top Bar extension to $ext_path"
             else
-                warn "Failed to extract Hide Top Bar (structure mismatch)"
+                warn "Failed to extract Hide Top Bar (structure mismatch). Contents: $(ls "$tmp_ext")"
             fi
         else
             warn "Failed to download Hide Top Bar extension"
