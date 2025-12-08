@@ -14,7 +14,8 @@ ISO_DOWNLOAD_DIR="${ISO_DOWNLOAD_DIR:-/root}"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 detect_latest_iso() {
-    info "Detecting latest Ubuntu 24.04.x ISO..."
+    # Log to stderr so it doesn't get captured by $(...)
+    echo "[INFO] Detecting latest Ubuntu 24.04.x ISO..." >&2
     
     local iso_filename
     iso_filename=$(curl -sL "$UBUNTU_RELEASES_URL" 2>/dev/null | \
@@ -22,7 +23,7 @@ detect_latest_iso() {
         sort -V | tail -1)
     
     if [[ -z "$iso_filename" ]]; then
-        warn "Could not detect latest ISO version, falling back to 24.04"
+        echo "[WARN] Could not detect latest ISO version, falling back to 24.04" >&2
         iso_filename="ubuntu-24.04-desktop-amd64.iso"
     fi
     
