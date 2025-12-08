@@ -8,36 +8,63 @@ Production-ready PXE server installer for secure exam lab environments.
 
 ```bash
 # Auto-download latest Ubuntu 24.04.x and install (prompts for confirmation)
-curl -fsSL https://raw.githubusercontent.com/testpress/exam-netboot-infra/main/pxe-server/dist/install.sh | sudo bash
+curl -fsSL https://bit.ly/tpnetboot | sudo bash
 ```
 
 ### One-Liner with Existing ISO
 
 ```bash
 # Use existing ISO, non-interactive mode
-curl -fsSL https://raw.githubusercontent.com/testpress/exam-netboot-infra/main/pxe-server/dist/install.sh | sudo bash -s -- -i /root/ubuntu-24.04.3-desktop-amd64.iso -y
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- -i /root/ubuntu-24.04.3-desktop-amd64.iso -y
 ```
 
 ### Curl Examples with Options
 
 ```bash
 # Specify ethernet interface (when WiFi is default route)
-curl -fsSL https://...install.sh | sudo bash -s -- --interface enp3s0 -y
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- --interface enp3s0 -y
 
 # Create debug client (no key blocking, shortcuts enabled)
-curl -fsSL https://...install.sh | sudo bash -s -- -i /root/ubuntu.iso --kiosk-debug -y
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- -i /root/ubuntu.iso --kiosk-debug -y
 
 # Dry-run to see what will happen
-curl -fsSL https://...install.sh | sudo bash -s -- --dry-run --verbose
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- --dry-run --verbose
 
 # Skip package installation (already installed)
-curl -fsSL https://...install.sh | sudo bash -s -- -i /root/ubuntu.iso --skip-packages -y
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- -i /root/ubuntu.iso --skip-packages -y
+```
 
-# Run only kiosk customization step
-curl -fsSL https://...install.sh | sudo bash -s -- --step kiosk --force
+### Step-by-Step Installation with Resume
 
-# Resume from dnsmasq step
-curl -fsSL https://...install.sh | sudo bash -s -- --from-step dnsmasq
+The installer tracks progress in `/var/lib/pxe-setup/completed_steps`. You can run it step-by-step and resume later.
+
+**Example workflow:**
+
+```bash
+# Step 1: See all available steps
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- --list-steps
+# Output shows: iso_download, static_ip, packages, directories, pxeroot, 
+#               bootloaders, tftp, nfs, pxelinux, grub, dnsmasq, kiosk, services
+
+# Step 2: Run first step only
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- --step iso_download
+
+# Step 3: Run next step manually
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- --step packages
+
+# ... or run all remaining steps at once (completed steps are skipped)
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- -y
+
+# If something fails, fix the issue and resume
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- --from-step dnsmasq
+
+# To start completely fresh
+curl -fsSL https://bit.ly/tpnetboot | sudo bash -s -- --reset
+```
+
+**Check progress at any time:**
+```bash
+cat /var/lib/pxe-setup/completed_steps
 ```
 
 ### Local Installation
@@ -83,6 +110,9 @@ sudo ./dist/install.sh
 | `--step <name>` | Run only a single step |
 | `--from-step <name>` | Resume from a specific step |
 | `--reset` | Clear all progress and start fresh |
+
+> **Note:** Step completion is tracked in `/var/lib/pxe-setup/completed_steps`. 
+> Running the script again will skip completed steps automatically. Use `--force` to re-run or `--reset` to start fresh.
 
 ## Configuration
 
