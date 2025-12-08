@@ -257,6 +257,8 @@ setup_shortcuts() {
     local p3="\$path_base/custom3/" # Block Ctrl+T
     local p4="\$path_base/custom4/" # Block Ctrl+Shift+I (Inspector)
     local p5="\$path_base/custom5/" # Block F12 (DevTools)
+    local p6="\$path_base/custom6/" # Block Ctrl+L (Address Bar)
+    local p7="\$path_base/custom7/" # Block Ctrl+I (Page Info)
     
     # 1. Reload Shortcut (Ctrl+Alt+R)
     local reload_cmd="/bin/true"
@@ -275,12 +277,14 @@ RELOAD
         reload_bind="<Control><Alt>r"
     fi
     
-    # 2. Blocking Ctrl+Q / Ctrl+W / Ctrl+T / Inspector
+    # 2. Blocking Ctrl+Q / Ctrl+W / Ctrl+T / Inspector / L / I
     local block_bind_q=""
     local block_bind_w=""
     local block_bind_t=""
     local block_bind_i=""
     local block_bind_f12=""
+    local block_bind_l=""
+    local block_bind_info=""
     
     if [ "\$KIOSK_BLOCK_KEYS" == "true" ]; then
         block_bind_q="<Control>q"
@@ -288,41 +292,72 @@ RELOAD
         block_bind_t="<Control>t"
         block_bind_i="<Control><Shift>i"
         block_bind_f12="F12"
+        block_bind_l="<Control>l"
+        block_bind_info="<Control>i"
     fi
     
     # Apply Settings
     # Register the list of custom bindings
-    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['\$p0', '\$p1', '\$p2', '\$p3', '\$p4', '\$p5']" 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['\$p0', '\$p1', '\$p2', '\$p3', '\$p4', '\$p5', '\$p6', '\$p7']" 2>/dev/null || true
     
     # Configure Reload
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p0 name 'Kiosk Reload'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p0 command "\$reload_cmd"
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p0 binding "\$reload_bind"
     
-    # Configure Block Q
+    # Configure Blocks
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p1 name 'Block Ctrl-Q'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p1 command '/bin/true'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p1 binding "\$block_bind_q"
     
-    # Configure Block W
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p2 name 'Block Ctrl-W'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p2 command '/bin/true'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p2 binding "\$block_bind_w"
 
-    # Configure Block Ctrl+T
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p3 name 'Block Ctrl-T'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p3 command '/bin/true'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p3 binding "\$block_bind_t"
     
-    # Configure Block Inspector (Ctrl+Shift+I)
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p4 name 'Block Inspector'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p4 command '/bin/true'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p4 binding "\$block_bind_i"
     
-    # Configure Block F12
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p5 name 'Block F12'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p5 command '/bin/true'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p5 binding "\$block_bind_f12"
+    
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p6 name 'Block Ctrl-L'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p6 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p6 binding "\$block_bind_l"
+    
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p7 name 'Block Ctrl-I'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p7 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p7 binding "\$block_bind_info"
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Harden Desktop UI (Limit Interaction)
+# ───────────────────────────────────────────────────────────────────────────────
+
+harden_desktop() {
+    echo "\$(date -Iseconds) Hardening desktop UI elements" >> "\$LOG"
+    # Disable Hot Corners (Activities)
+    gsettings set org.gnome.desktop.interface enable-hot-corners false 2>/dev/null || true
+    
+    # Hide Ubuntu Dock
+    gsettings set org.gnome.shell.extensions.dash-to-dock autohide true 2>/dev/null || true
+    gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed false 2>/dev/null || true
+    gsettings set org.gnome.shell.extensions.dash-to-dock intellihide false 2>/dev/null || true
+    gsettings set org.gnome.shell.extensions.dash-to-dock height 0 2>/dev/null || true
+    
+    # Disable Desktop Icons (DING)
+    gsettings set org.gnome.shell.extensions.ding show-home false 2>/dev/null || true
+    gsettings set org.gnome.shell.extensions.ding show-trash false 2>/dev/null || true
+    
+    # GNOME Lockdown
+    gsettings set org.gnome.desktop.lockdown disable-lock-screen true 2>/dev/null || true
+    gsettings set org.gnome.desktop.lockdown disable-user-switching true 2>/dev/null || true
+    gsettings set org.gnome.desktop.lockdown disable-log-out true 2>/dev/null || true
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -346,6 +381,7 @@ wait_for_gnome
 connect_wifi
 disable_shortcuts
 block_keys
+harden_desktop
 setup_shortcuts
 prevent_sleep
 
