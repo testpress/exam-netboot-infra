@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T09:01:24Z"
+readonly BUILD_DATE="2025-12-08T09:30:51Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1037,29 +1037,34 @@ populate_tftp_files() {
     # BIOS boot files (pxelinux)
     # ─────────────────────────────────────────────────────────────────────────
     
-    local syslinux_dir="$WORK_DIR/syslinux-6.03"
+    # ─────────────────────────────────────────────────────────────────────────
+    # BIOS boot files (pxelinux)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # Check for extracted syslinux directory (handle version variances)
+    local syslinux_dir
+    syslinux_dir=$(find "$WORK_DIR" -maxdepth 1 -type d -name "syslinux-*" | head -n 1)
     
     if [[ -d "$syslinux_dir" ]]; then
-        info "Copying BIOS boot files..."
+        info "Copying BIOS boot files from $syslinux_dir..."
         
-        # Core pxelinux files
-        cp -f "$syslinux_dir/bios/core/pxelinux.0" "$TFTP_ROOT/bios/" 2>/dev/null || \
-            warn "pxelinux.0 not found"
-        cp -f "$syslinux_dir/bios/core/lpxelinux.0" "$TFTP_ROOT/bios/" 2>/dev/null || \
-            warn "lpxelinux.0 not found"
+        # Core pxelinux files (search recursively as layout can vary)
+        find "$syslinux_dir" -name "pxelinux.0" -exec cp -f {} "$TFTP_ROOT/bios/" \;
+        find "$syslinux_dir" -name "lpxelinux.0" -exec cp -f {} "$TFTP_ROOT/bios/" \;
         
         # Required library modules
-        cp -f "$syslinux_dir/bios/com32/elflink/ldlinux/ldlinux.c32" "$TFTP_ROOT/bios/" 2>/dev/null || true
-        cp -f "$syslinux_dir/bios/com32/libutil/libutil.c32" "$TFTP_ROOT/bios/" 2>/dev/null || true
-        cp -f "$syslinux_dir/bios/com32/lib/libcom32.c32" "$TFTP_ROOT/bios/" 2>/dev/null || true
+        find "$syslinux_dir" -name "ldlinux.c32" -exec cp -f {} "$TFTP_ROOT/bios/" \;
+        find "$syslinux_dir" -name "libutil.c32" -exec cp -f {} "$TFTP_ROOT/bios/" \;
+        find "$syslinux_dir" -name "libcom32.c32" -exec cp -f {} "$TFTP_ROOT/bios/" \;
         
         # Menu modules
-        cp -f "$syslinux_dir/bios/com32/menu/menu.c32" "$TFTP_ROOT/bios/" 2>/dev/null || true
-        cp -f "$syslinux_dir/bios/com32/menu/vesamenu.c32" "$TFTP_ROOT/bios/" 2>/dev/null || true
+        find "$syslinux_dir" -name "menu.c32" -exec cp -f {} "$TFTP_ROOT/bios/" \;
+        find "$syslinux_dir" -name "vesamenu.c32" -exec cp -f {} "$TFTP_ROOT/bios/" \;
         
         debug "BIOS boot files copied"
     else
-        warn "Syslinux directory not found at $syslinux_dir"
+        warn "Syslinux directory not found in $WORK_DIR. Contents:"
+        ls -la "$WORK_DIR" | head -n 5
         warn "BIOS PXE boot may not work"
     fi
     
@@ -1069,40 +1074,28 @@ populate_tftp_files() {
     
     info "Copying UEFI boot files..."
     
-    # Find and copy shimx64.efi
-    local shim_found=false
-    for d in "$WORK_DIR"/pkg_shim-signed*; do
-        if [[ -d "$d" ]]; then
-            local shim_file="$d/usr/lib/shim/shimx64.efi.signed"
-            if [[ -f "$shim_file" ]]; then
-                cp -f "$shim_file" "$TFTP_ROOT/grub/bootx64.efi"
-                shim_found=true
-                debug "Copied shimx64.efi"
-                break
-            fi
-        fi
-    done
+    # Find and copy shimx64.efi (handle different paths/versions)
+    local shim_file
+    shim_file=$(find "$WORK_DIR" -name "shimx64.efi.signed" -o -name "shimx64.efi" | head -n 1)
     
-    if [[ "$shim_found" != true ]]; then
-        warn "shimx64.efi not found - UEFI boot may not work"
+    if [[ -f "$shim_file" ]]; then
+        cp -f "$shim_file" "$TFTP_ROOT/grub/bootx64.efi"
+        debug "Copied shim: $shim_file -> bootx64.efi"
+    else
+        warn "shimx64.efi not found in downloaded packages"
+        warn "UEFI Secure Boot may not work"
     fi
     
     # Find and copy grubnetx64.efi
-    local grub_found=false
-    for d in "$WORK_DIR"/pkg_grub-efi-amd64-signed*; do
-        if [[ -d "$d" ]]; then
-            local grub_file="$d/usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed"
-            if [[ -f "$grub_file" ]]; then
-                cp -f "$grub_file" "$TFTP_ROOT/grub/grubx64.efi"
-                grub_found=true
-                debug "Copied grubnetx64.efi"
-                break
-            fi
-        fi
-    done
+    local grub_file
+    grub_file=$(find "$WORK_DIR" -name "grubnetx64.efi.signed" -o -name "grubnetx64.efi" | head -n 1)
     
-    if [[ "$grub_found" != true ]]; then
-        warn "grubnetx64.efi not found - UEFI boot may not work"
+    if [[ -f "$grub_file" ]]; then
+        cp -f "$grub_file" "$TFTP_ROOT/grub/grubx64.efi"
+        debug "Copied grub: $grub_file -> grubx64.efi"
+    else
+        warn "grubnetx64.efi not found in downloaded packages"
+        warn "UEFI boot may not work"
     fi
     
     # ─────────────────────────────────────────────────────────────────────────
@@ -1238,8 +1231,9 @@ write_dnsmasq_config() {
 # Generated by pxe-server installer on $(date)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Interface binding
-interface=$DEFAULT_IF,lo
+# Interface binding (bind only to PXE interface to avoid systemd-resolved conflict)
+interface=$DEFAULT_IF
+except-interface=lo
 bind-interfaces
 
 # Domain
