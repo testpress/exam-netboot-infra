@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T13:17:50Z"
+readonly BUILD_DATE="2025-12-08T13:39:14Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1662,6 +1662,10 @@ disable_shortcuts() {
     gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings switch-windows "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings switch-windows-backward "[]" 2>/dev/null || true
+    
+    # Disable Alt+Backtick (Switch Windows of Same App)
+    gsettings set org.gnome.desktop.wm.keybindings switch-group "[]" 2>/dev/null || true
+    gsettings set org.gnome.desktop.wm.keybindings switch-group-backward "[]" 2>/dev/null || true
     
     gsettings set org.gnome.settings-daemon.plugins.media-keys terminal "[]" 2>/dev/null || true
     gsettings set org.gnome.mutter overlay-key '' 2>/dev/null || true
