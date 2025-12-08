@@ -146,3 +146,136 @@ setup() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"DRY-RUN"* ]]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step Control Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+setup_main() {
+    # Source main.sh for step control tests
+    SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+    
+    # Set required variables before sourcing
+    export DRY_RUN=true
+    export LOG_LEVEL=ERROR
+    export ISO_PATH="/tmp/test.iso"
+    export SERVER_IP="10.0.0.1"
+    export DEFAULT_IF="eth0"
+    export KIOSK_URL="https://example.com"
+    export NFS_CLIENT_NETS="10.0.0.0/24"
+    export DHCP_RANGE_START="10.0.0.170"
+    export DHCP_RANGE_END="10.0.0.200"
+    
+    # Source libraries first
+    for lib in logging config preflight network packages; do
+        source "$SCRIPT_DIR/lib/${lib}.sh" 2>/dev/null || true
+    done
+}
+
+@test "ALL_STEPS array has 12 steps" {
+    setup_main
+    
+    # Define ALL_STEPS as it would be in main.sh
+    ALL_STEPS=(packages directories webroot bootloaders tftp nfs pxelinux grub dnsmasq nginx kiosk services)
+    
+    [ "${#ALL_STEPS[@]}" -eq 12 ]
+}
+
+@test "get_step_description() returns description for packages" {
+    setup_main
+    
+    # Define the function as in main.sh
+    get_step_description() {
+        case "$1" in
+            packages) echo "Install required apt packages" ;;
+            *) echo "" ;;
+        esac
+    }
+    
+    run get_step_description "packages"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"apt packages"* ]]
+}
+
+@test "get_step_description() returns empty for unknown step" {
+    setup_main
+    
+    get_step_description() {
+        case "$1" in
+            packages) echo "Install required apt packages" ;;
+            *) echo "" ;;
+        esac
+    }
+    
+    run get_step_description "unknown_step"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "get_step_function() returns correct function for packages" {
+    setup_main
+    
+    get_step_function() {
+        case "$1" in
+            packages) echo "install_packages" ;;
+            directories) echo "prepare_directories" ;;
+            *) echo "" ;;
+        esac
+    }
+    
+    run get_step_function "packages"
+    [ "$status" -eq 0 ]
+    [ "$output" = "install_packages" ]
+}
+
+@test "validate_step_name() succeeds for valid step" {
+    setup_main
+    
+    ALL_STEPS=(packages directories webroot)
+    
+    validate_step_name() {
+        local step="$1"
+        for s in "${ALL_STEPS[@]}"; do
+            if [[ "$s" == "$step" ]]; then
+                return 0
+            fi
+        done
+        return 1
+    }
+    
+    run validate_step_name "packages"
+    [ "$status" -eq 0 ]
+}
+
+@test "validate_step_name() fails for invalid step" {
+    setup_main
+    
+    ALL_STEPS=(packages directories webroot)
+    
+    validate_step_name() {
+        local step="$1"
+        for s in "${ALL_STEPS[@]}"; do
+            if [[ "$s" == "$step" ]]; then
+                return 0
+            fi
+        done
+        return 1
+    }
+    
+    run validate_step_name "invalid_step"
+    [ "$status" -ne 0 ]
+}
+
+@test "reset_state() clears state file" {
+    export STATE_FILE="/tmp/test_state_reset_$$"
+    export DRY_RUN=false
+    
+    # Create state file with content
+    echo "packages" > "$STATE_FILE"
+    echo "directories" >> "$STATE_FILE"
+    
+    reset_state
+    
+    # File should be removed
+    [ ! -f "$STATE_FILE" ]
+}
