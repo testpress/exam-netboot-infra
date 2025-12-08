@@ -63,7 +63,7 @@ cleanup_workdir() {
     local rc=$?
     
     # Don't cleanup in dry-run mode (nothing was created)
-    if [[ "${DRY_RUN:-false}" == true ]]; then
+    if [[ "${DRY_RUN:-false}" == true ]] || [[ "${KEEP_WORKDIR:-false}" == true ]]; then
         return $rc
     fi
     

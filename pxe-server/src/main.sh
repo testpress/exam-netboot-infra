@@ -273,7 +273,13 @@ parse_args() {
                 KIOSK_DISABLE_SHORTCUTS=false
                 KIOSK_WAIT_GNOME=false
                 KIOSK_ENABLE_XBINDKEYS=false
+                KIOSK_ENABLE_XBINDKEYS=false
                 info "Kiosk debug mode: all lockdown options disabled"
+                shift
+                ;;
+            --keep-workdir)
+                KEEP_WORKDIR=true
+                info "Work directory will be preserved for inspection"
                 shift
                 ;;
             -y|--yes)

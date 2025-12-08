@@ -113,8 +113,10 @@ populate_tftp_files() {
     shim_file=$(find "$WORK_DIR" -name "shimx64.efi.signed" -o -name "shimx64.efi" | head -n 1)
     
     if [[ -f "$shim_file" ]]; then
+        # Manual says: /tftp/grub/bootx64.efi
+        mkdir -p "$TFTP_ROOT/grub"
         cp -f "$shim_file" "$TFTP_ROOT/grub/bootx64.efi"
-        debug "Copied shim: $shim_file -> bootx64.efi"
+        debug "Copied shim: $shim_file -> $TFTP_ROOT/grub/bootx64.efi"
     else
         warn "shimx64.efi not found in downloaded packages"
         warn "UEFI Secure Boot may not work"
@@ -125,18 +127,31 @@ populate_tftp_files() {
     grub_file=$(find "$WORK_DIR" -name "grubnetx64.efi.signed" -o -name "grubnetx64.efi" | head -n 1)
     
     if [[ -f "$grub_file" ]]; then
-        cp -f "$grub_file" "$TFTP_ROOT/grub/grubx64.efi"
-        debug "Copied grub: $grub_file -> grubx64.efi"
+        # Manual says: /tftp/grubx64.efi
+        # We also copy it to /tftp/grub/ just in case, but follow manual primarily
+        cp -f "$grub_file" "$TFTP_ROOT/grubx64.efi"
+        cp -f "$grub_file" "$TFTP_ROOT/grub/grubx64.efi" 
+        debug "Copied grub: $grub_file -> $TFTP_ROOT/grubx64.efi"
     else
         warn "grubnetx64.efi not found in downloaded packages"
         warn "UEFI boot may not work"
     fi
-    
+
     # ─────────────────────────────────────────────────────────────────────────
     # Kernel and initrd
     # ─────────────────────────────────────────────────────────────────────────
     
     info "Copying kernel and initrd..."
+    
+    # Copy font.pf2 and bootx64.efi (if missing) from ISO if available (fallback/extra)
+    if [[ -d "$PXE_ROOT/boot/grub/fonts" ]]; then
+        mkdir -p "$TFTP_ROOT/grub/fonts"
+        cp -r "$PXE_ROOT/boot/grub/fonts/"* "$TFTP_ROOT/grub/fonts/" 2>/dev/null || true
+        debug "Copied grub fonts"
+    elif [[ -f "$PXE_ROOT/boot/grub/font.pf2" ]]; then
+        cp -f "$PXE_ROOT/boot/grub/font.pf2" "$TFTP_ROOT/grub/"
+        debug "Copied font.pf2"
+    fi
     
     if [[ -f "$PXE_ROOT/casper/vmlinuz" ]] && [[ -f "$PXE_ROOT/casper/initrd" ]]; then
         cp -f "$PXE_ROOT/casper/vmlinuz" "$TFTP_ROOT/boot/casper/"
