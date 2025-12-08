@@ -71,9 +71,10 @@ load_config() {
         source "$secrets_file"
     fi
     
-    # Parse NFS_CLIENT_NETS into array
+    # Parse NFS_CLIENT_NETS into array (use word splitting for portability)
     if [[ ${#NFS_CLIENT_NETS[@]} -eq 0 ]] || [[ "${NFS_CLIENT_NETS[*]}" == "" ]]; then
-        read -ra NFS_CLIENT_NETS <<< "$NFS_CLIENT_NETS_STR"
+        # shellcheck disable=SC2206
+        NFS_CLIENT_NETS=($NFS_CLIENT_NETS_STR)
     fi
     
     # Set state file path

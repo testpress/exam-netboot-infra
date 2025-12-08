@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T08:42:55Z"
+readonly BUILD_DATE="2025-12-08T08:52:01Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -221,9 +221,10 @@ load_config() {
         source "$secrets_file"
     fi
     
-    # Parse NFS_CLIENT_NETS into array
+    # Parse NFS_CLIENT_NETS into array (use word splitting for portability)
     if [[ ${#NFS_CLIENT_NETS[@]} -eq 0 ]] || [[ "${NFS_CLIENT_NETS[*]}" == "" ]]; then
-        read -ra NFS_CLIENT_NETS <<< "$NFS_CLIENT_NETS_STR"
+        # shellcheck disable=SC2206
+        NFS_CLIENT_NETS=($NFS_CLIENT_NETS_STR)
     fi
     
     # Set state file path
@@ -454,16 +455,11 @@ validate_config() {
         fi
     fi
     
-    # CIDR validation for NFS networks (force parse from string)
-    local nfs_nets=()
-    if [[ -n "${NFS_CLIENT_NETS_STR:-}" ]]; then
-        debug "NFS_CLIENT_NETS_STR='$NFS_CLIENT_NETS_STR'"
-        read -ra nfs_nets <<< "$NFS_CLIENT_NETS_STR"
-        debug "Parsed ${#nfs_nets[@]} networks: ${nfs_nets[*]}"
-    fi
+    # CIDR validation for NFS networks (use word splitting for portability)
+    # shellcheck disable=SC2206
+    local nfs_nets=(${NFS_CLIENT_NETS_STR:-})
     
     for net in "${nfs_nets[@]}"; do
-        debug "Validating network: '$net'"
         if [[ ! "$net" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
             error "Invalid CIDR notation for NFS network: $net"
             ((errors++)) || true
