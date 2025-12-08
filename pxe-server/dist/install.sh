@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T15:09:53Z"
+readonly BUILD_DATE="2025-12-08T17:00:55Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -182,7 +182,7 @@ NFS_CLIENT_NETS=()
 # Kiosk Settings
 ENABLE_KIOSK="${ENABLE_KIOSK:-true}"
 KIOSK_USER="${KIOSK_USER:-ubuntu}"
-KIOSK_URL="${KIOSK_URL:-http://10.0.0.1}"
+KIOSK_URL="${KIOSK_URL:-http://10.0.0.1/login/?next=/exams/chapter_content/50/}"
 KIOSK_SSID="${KIOSK_SSID:-}"
 KIOSK_PASSWORD="${KIOSK_PASSWORD:-}"
 
