@@ -1,0 +1,76 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# PXE Server Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Copy this file to /etc/pxe-server/config.conf and customize
+#
+# Usage:
+#   sudo mkdir -p /etc/pxe-server
+#   sudo cp pxe-server.conf.example /etc/pxe-server/config.conf
+#   sudo vim /etc/pxe-server/config.conf
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Required Settings
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Path to Ubuntu Desktop ISO
+# Download from: https://ubuntu.com/download/desktop
+ISO_PATH="/root/ubuntu-24.04.3-desktop-amd64.iso"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Directory Paths
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Temporary work directory (will be cleaned up after install)
+WORK_DIR="/root/pxe_work"
+
+# Web server root for PXE files (ISO contents)
+PXE_WEBROOT="/var/www/html/desktop/u2404"
+
+# TFTP root directory for boot files
+TFTP_ROOT="/tftp"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# DHCP Configuration
+# ───────────────────────────────────────────────────────────────────────────────
+
+# DHCP range for PXE clients
+# Adjust these to fit your network
+DHCP_RANGE_START="10.0.0.170"
+DHCP_RANGE_END="10.0.0.200"
+DHCP_NETMASK="255.255.255.0"
+DHCP_LEASE="12h"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# NFS Configuration
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Networks allowed to mount NFS (space-separated CIDR notation)
+NFS_CLIENT_NETS="10.0.0.0/24 192.168.1.0/24"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Kiosk Mode Settings
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Enable kiosk mode customization
+ENABLE_KIOSK="true"
+
+# Username for kiosk session
+KIOSK_USER="ubuntu"
+
+# URL to open in kiosk mode (your exam website)
+KIOSK_URL="https://lmsdemo.testpress.in"
+
+# WiFi credentials are in secrets.conf (see secrets.conf.example)
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Logging
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Log level: DEBUG, INFO, WARN, ERROR
+LOG_LEVEL="INFO"
+
+# Log file path
+LOG_FILE="/var/log/pxe-setup.log"
