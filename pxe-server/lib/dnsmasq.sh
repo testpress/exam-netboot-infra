@@ -13,6 +13,20 @@ write_dnsmasq_config() {
         detect_network_interface_and_ip
     fi
     
+    # Explicitly bring up interface and ensure IP to avoid bind errors
+    # (Just in case netplan apply was slow or failed)
+    info "Ensuring interface $DEFAULT_IF is up..."
+    ip link set "$DEFAULT_IF" up 2>/dev/null || true
+    
+    # If we have a static IP configured, ensure it's assigned
+    if [[ -n "${STATIC_IP:-}" ]]; then
+        # Check if IP is already assigned
+        if ! ip -4 addr show "$DEFAULT_IF" | grep -q "${STATIC_IP%/*}"; then
+            info "Assigning static IP $STATIC_IP to $DEFAULT_IF..."
+            ip addr add "$STATIC_IP" dev "$DEFAULT_IF" 2>/dev/null || true
+        fi
+    fi
+    
     if [[ "${DRY_RUN:-false}" == true ]]; then
         info "[DRY-RUN] Would write dnsmasq config to $DNSMASQ_CONF"
         info "[DRY-RUN] DHCP range: $DHCP_RANGE_START - $DHCP_RANGE_END"

@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T09:33:28Z"
+readonly BUILD_DATE="2025-12-08T09:43:40Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1216,6 +1216,20 @@ write_dnsmasq_config() {
     # Ensure we have network info
     if [[ -z "${SERVER_IP:-}" ]] || [[ -z "${DEFAULT_IF:-}" ]]; then
         detect_network_interface_and_ip
+    fi
+    
+    # Explicitly bring up interface and ensure IP to avoid bind errors
+    # (Just in case netplan apply was slow or failed)
+    info "Ensuring interface $DEFAULT_IF is up..."
+    ip link set "$DEFAULT_IF" up 2>/dev/null || true
+    
+    # If we have a static IP configured, ensure it's assigned
+    if [[ -n "${STATIC_IP:-}" ]]; then
+        # Check if IP is already assigned
+        if ! ip -4 addr show "$DEFAULT_IF" | grep -q "${STATIC_IP%/*}"; then
+            info "Assigning static IP $STATIC_IP to $DEFAULT_IF..."
+            ip addr add "$STATIC_IP" dev "$DEFAULT_IF" 2>/dev/null || true
+        fi
     fi
     
     if [[ "${DRY_RUN:-false}" == true ]]; then
