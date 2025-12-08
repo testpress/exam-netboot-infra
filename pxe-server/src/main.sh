@@ -425,6 +425,24 @@ show_summary() {
     log_separator
 }
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Early Network Setup (Custom)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+early_network_setup() {
+    # Custom interface setup for specific hardware as requested
+    local iface="enp0s31f6"
+    if ip link show "$iface" >/dev/null 2>&1; then
+        # Check if already has IP to avoid spamming logs/errors
+        if ! ip addr show "$iface" | grep -q "10.0.0.1"; then
+            echo "Configuring early network on $iface..."
+            ip addr add 10.0.0.1/24 dev "$iface" || true
+            ip link set "$iface" up || true
+        fi
+    fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main Entry Point
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -432,6 +450,9 @@ show_summary() {
 main() {
     # Parse command-line arguments
     parse_args "$@"
+    
+    # Run early network setup immediately
+    early_network_setup
     
     # Show banner
     show_banner
