@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T11:05:01Z"
+readonly BUILD_DATE="2025-12-08T11:36:47Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1506,6 +1506,7 @@ perform_kiosk_customization() {
     
     _inject_kiosk_autostart "$unsquash_dir"
     _inject_kiosk_policies "$unsquash_dir"
+    _inject_kiosk_service "$unsquash_dir"
     
     # ─────────────────────────────────────────────────────────────────────────
     # Repack the squashfs
@@ -1532,7 +1533,47 @@ perform_kiosk_customization() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Kiosk Autostart Script Injection
+# Kiosk Service Injection (Systemd)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_inject_kiosk_service() {
+    local rootdir="$1"
+    local service_dir="$rootdir/etc/systemd/system"
+    mkdir -p "$service_dir"
+    
+    info "Injecting Firefox systemd service..."
+    
+    local service_file="$service_dir/firefox-kiosk.service"
+    
+    cat > "$service_file" <<SYSTEMD
+[Unit]
+Description=Firefox Kiosk Mode
+After=graphical.target
+
+[Service]
+Type=simple
+User=${KIOSK_USER}
+Group=${KIOSK_USER}
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/${KIOSK_USER}/.Xauthority
+ExecStart=/usr/bin/firefox --kiosk --private-window ${KIOSK_URL} --new-instance
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target
+SYSTEMD
+
+    # Enable the service by creating the symlink
+    local wants_dir="$service_dir/graphical.target.wants"
+    mkdir -p "$wants_dir"
+    ln -sfn "/etc/systemd/system/firefox-kiosk.service" "$wants_dir/firefox-kiosk.service"
+    
+    debug "Created systemd service at $service_file"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Kiosk Autostart Script Injection (GNOME Settings)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _inject_kiosk_autostart() {
@@ -1684,40 +1725,6 @@ prevent_sleep() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Install and Enable Firefox Systemd User Service (auto-restart)
-# ───────────────────────────────────────────────────────────────────────────────
-
-setup_firefox_service() {
-    local service_dir="/home/\$KIOSK_USER/.config/systemd/user"
-    mkdir -p "\$service_dir"
-    
-    cat > "\$service_dir/firefox-kiosk.service" <<SYSTEMD
-[Unit]
-Description=Firefox Kiosk Mode
-After=graphical-session.target
-
-[Service]
-Type=simple
-Environment=DISPLAY=:0
-ExecStart=/usr/bin/firefox --kiosk --private-window \$KIOSK_URL --new-instance
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=default.target
-SYSTEMD
-    
-    chown -R "\$KIOSK_USER:\$KIOSK_USER" "/home/\$KIOSK_USER/.config"
-    
-    # Enable and start the service
-    sudo -u "\$KIOSK_USER" systemctl --user daemon-reload 2>/dev/null || true
-    sudo -u "\$KIOSK_USER" systemctl --user enable firefox-kiosk.service 2>/dev/null || true
-    sudo -u "\$KIOSK_USER" systemctl --user start firefox-kiosk.service 2>/dev/null || true
-    
-    echo "\$(date -Iseconds) Firefox systemd service enabled (auto-restart)" >> "\$LOG"
-}
-
-# ───────────────────────────────────────────────────────────────────────────────
 # Main
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -1727,7 +1734,6 @@ disable_shortcuts
 block_keys
 setup_reload_shortcut
 prevent_sleep
-setup_firefox_service
 
 echo "\$(date -Iseconds) Kiosk setup complete" >> "\$LOG"
 KIOSK_SCRIPT
