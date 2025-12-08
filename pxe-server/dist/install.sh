@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T14:54:40Z"
+readonly BUILD_DATE="2025-12-08T15:09:53Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -2031,6 +2031,17 @@ app-menu=false
 clock-menu=false
 system-menu=false
 JUSTPERF_OVERRIDE
+    
+    # Override 3: Dash-to-Dock settings (disable completely)
+    info "Creating dash-to-dock disable override..."
+    cat > "$schemas_dir/99-dash-to-dock-disable.gschema.override" <<'DASHTODOCK_OVERRIDE'
+[org.gnome.shell.extensions.dash-to-dock]
+dock-fixed=false
+autohide=true
+intellihide=false
+show-dock-urgent-notify=false
+disable-overview-on-startup=true
+DASHTODOCK_OVERRIDE
     
     # ─────────────────────────────────────────────────────────────────────────
     # Compile schemas inside chroot
