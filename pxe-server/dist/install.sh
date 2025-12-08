@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T08:05:20Z"
+readonly BUILD_DATE="2025-12-08T08:24:34Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -321,7 +321,7 @@ preflight_checks() {
     # Check running as root
     if [[ $(id -u) -ne 0 ]]; then
         error "This script must be run as root (use sudo)"
-        ((errors++))
+        ((errors++)) || true
     fi
     
     # Check OS (parse instead of source to avoid variable conflicts)
@@ -333,16 +333,16 @@ preflight_checks() {
         
         if [[ "$os_id" != "ubuntu" ]]; then
             warn "Script designed for Ubuntu, running on: $os_id"
-            ((warnings++))
+            ((warnings++)) || true
         elif [[ "${os_version%%.*}" -lt 22 ]]; then
             warn "Script tested on Ubuntu 22.04+, running on: $os_version"
-            ((warnings++))
+            ((warnings++)) || true
         else
             debug "OS check passed: $os_name"
         fi
     else
         warn "Cannot determine OS version"
-        ((warnings++))
+        ((warnings++)) || true
     fi
     
     # Check disk space (need ~15GB for ISO extraction + squashfs work)
@@ -350,7 +350,7 @@ preflight_checks() {
     free_gb=$(df -BG / 2>/dev/null | awk 'NR==2 {gsub("G",""); print $4}' || echo "0")
     if [[ "$free_gb" -lt 15 ]]; then
         error "Insufficient disk space: ${free_gb}GB available, need 15GB+"
-        ((errors++))
+        ((errors++)) || true
     else
         debug "Disk space OK: ${free_gb}GB available"
     fi
@@ -359,7 +359,7 @@ preflight_checks() {
     if [[ -n "${ISO_PATH:-}" ]] && [[ -f "$ISO_PATH" ]]; then
         if [[ ! -r "$ISO_PATH" ]]; then
             error "ISO not readable: $ISO_PATH"
-            ((errors++))
+            ((errors++)) || true
         else
             debug "ISO found: $ISO_PATH"
         fi
@@ -378,7 +378,7 @@ preflight_checks() {
             local service
             service=$(ss -tlnp 2>/dev/null | grep ":$port " | awk '{print $NF}' | head -1)
             warn "Port $port already in use by: $service"
-            ((warnings++))
+            ((warnings++)) || true
         fi
     done
     
@@ -386,14 +386,14 @@ preflight_checks() {
     if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
         warn "systemd-resolved is active - may conflict with dnsmasq on port 53"
         info "  → Consider: sudo systemctl disable --now systemd-resolved"
-        ((warnings++))
+        ((warnings++)) || true
     fi
     
     # Check network connectivity
     if ! ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
         warn "No internet connectivity detected"
         warn "  Package installation may fail"
-        ((warnings++))
+        ((warnings++)) || true
     else
         debug "Internet connectivity OK"
     fi
@@ -403,7 +403,7 @@ preflight_checks() {
     for cmd in "${base_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
             error "Required base command not found: $cmd"
-            ((errors++))
+            ((errors++)) || true
         fi
     done
     
@@ -434,23 +434,23 @@ validate_config() {
     # Required values
     if [[ -z "$ISO_PATH" ]]; then
         error "ISO_PATH is required"
-        ((errors++))
+        ((errors++)) || true
     fi
     
     if [[ -z "${SERVER_IP:-}" ]]; then
         error "SERVER_IP could not be determined"
         error "  Run detect_network_interface_and_ip first"
-        ((errors++))
+        ((errors++)) || true
     fi
     
     # Kiosk URL validation
     if [[ "${ENABLE_KIOSK:-true}" == true ]]; then
         if [[ -z "$KIOSK_URL" ]]; then
             error "KIOSK_URL is required when kiosk mode is enabled"
-            ((errors++))
+            ((errors++)) || true
         elif [[ ! "$KIOSK_URL" =~ ^https?:// ]]; then
             error "KIOSK_URL must be a valid HTTP(S) URL: $KIOSK_URL"
-            ((errors++))
+            ((errors++)) || true
         fi
     fi
     
@@ -458,19 +458,19 @@ validate_config() {
     for net in "${NFS_CLIENT_NETS[@]}"; do
         if [[ ! "$net" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
             error "Invalid CIDR notation for NFS network: $net"
-            ((errors++))
+            ((errors++)) || true
         fi
     done
     
     # DHCP range validation
     if [[ ! "$DHCP_RANGE_START" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         error "Invalid DHCP_RANGE_START: $DHCP_RANGE_START"
-        ((errors++))
+        ((errors++)) || true
     fi
     
     if [[ ! "$DHCP_RANGE_END" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         error "Invalid DHCP_RANGE_END: $DHCP_RANGE_END"
-        ((errors++))
+        ((errors++)) || true
     fi
     
     if [[ $errors -gt 0 ]]; then
