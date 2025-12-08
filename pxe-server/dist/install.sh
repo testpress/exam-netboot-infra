@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T09:30:51Z"
+readonly BUILD_DATE="2025-12-08T09:33:28Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1426,11 +1426,12 @@ perform_kiosk_customization() {
     
     local unsquash_dir="${WORK_DIR}/client-root"
     
-    # Clean up any previous attempt
+    # Clean up any previous attempt (unsquashfs expects to create the dir)
     if [[ -d "$unsquash_dir" ]]; then
         rm -rf "$unsquash_dir"
     fi
-    mkdir -p "$unsquash_dir"
+    # Do NOT mkdir here - unsquashfs will fail if dir exists
+    # mkdir -p "$unsquash_dir"
     
     info "Unsquashing filesystem (this may take a few minutes)..."
     if ! unsquashfs -d "$unsquash_dir" "$squash"; then
