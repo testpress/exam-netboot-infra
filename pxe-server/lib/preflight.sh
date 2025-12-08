@@ -21,18 +21,21 @@ preflight_checks() {
         ((errors++))
     fi
     
-    # Check OS
+    # Check OS (parse instead of source to avoid variable conflicts)
     if [[ -f /etc/os-release ]]; then
-        # shellcheck source=/dev/null
-        source /etc/os-release
-        if [[ "$ID" != "ubuntu" ]]; then
-            warn "Script designed for Ubuntu, running on: $ID"
+        local os_id os_version os_name
+        os_id=$(grep -oP '^ID=\K.*' /etc/os-release 2>/dev/null | tr -d '"')
+        os_version=$(grep -oP '^VERSION_ID=\K.*' /etc/os-release 2>/dev/null | tr -d '"')
+        os_name=$(grep -oP '^PRETTY_NAME=\K.*' /etc/os-release 2>/dev/null | tr -d '"')
+        
+        if [[ "$os_id" != "ubuntu" ]]; then
+            warn "Script designed for Ubuntu, running on: $os_id"
             ((warnings++))
-        elif [[ "${VERSION_ID%%.*}" -lt 22 ]]; then
-            warn "Script tested on Ubuntu 22.04+, running on: $VERSION_ID"
+        elif [[ "${os_version%%.*}" -lt 22 ]]; then
+            warn "Script tested on Ubuntu 22.04+, running on: $os_version"
             ((warnings++))
         else
-            debug "OS check passed: $PRETTY_NAME"
+            debug "OS check passed: $os_name"
         fi
     else
         warn "Cannot determine OS version"
