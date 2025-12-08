@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T13:00:48Z"
+readonly BUILD_DATE="2025-12-08T13:06:09Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1656,6 +1656,13 @@ disable_shortcuts() {
     gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "[]" 2>/dev/null || true
     gsettings set org.gnome.desktop.wm.keybindings close "[]" 2>/dev/null || true
+    
+    # Disable Alt+Tab (Switch Applications)
+    gsettings set org.gnome.desktop.wm.keybindings switch-applications "[]" 2>/dev/null || true
+    gsettings set org.gnome.desktop.wm.keybindings switch-applications-backward "[]" 2>/dev/null || true
+    gsettings set org.gnome.desktop.wm.keybindings switch-windows "[]" 2>/dev/null || true
+    gsettings set org.gnome.desktop.wm.keybindings switch-windows-backward "[]" 2>/dev/null || true
+    
     gsettings set org.gnome.settings-daemon.plugins.media-keys terminal "[]" 2>/dev/null || true
     gsettings set org.gnome.mutter overlay-key '' 2>/dev/null || true
 }
@@ -1678,10 +1685,6 @@ block_keys() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
-# xbindkeys Reload Shortcut (Ctrl+Alt+R)
-# ───────────────────────────────────────────────────────────────────────────────
-
-# ───────────────────────────────────────────────────────────────────────────────
 # Setup Shortcuts (Reload + Blocking)
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -1699,6 +1702,9 @@ setup_shortcuts() {
     local p5="\$path_base/custom5/" # Block F12 (DevTools)
     local p6="\$path_base/custom6/" # Block Ctrl+L (Address Bar)
     local p7="\$path_base/custom7/" # Block Ctrl+I (Page Info)
+    local p8="\$path_base/custom8/" # Block Ctrl+Shift+C (Inspector Picker)
+    local p9="\$path_base/custom9/" # Block Ctrl+Shift+E (Network)
+    local p10="\$path_base/custom10/" # Block Ctrl+Shift+W (Close Window)
     
     # 1. Reload Shortcut (Ctrl+Alt+R)
     local reload_cmd="/bin/true"
@@ -1717,7 +1723,7 @@ RELOAD
         reload_bind="<Control><Alt>r"
     fi
     
-    # 2. Blocking Ctrl+Q / Ctrl+W / Ctrl+T / Inspector / L / I
+    # 2. Blocking Dangerous Shortcuts
     local block_bind_q=""
     local block_bind_w=""
     local block_bind_t=""
@@ -1725,6 +1731,9 @@ RELOAD
     local block_bind_f12=""
     local block_bind_l=""
     local block_bind_info=""
+    local block_bind_c=""
+    local block_bind_e=""
+    local block_bind_sw=""
     
     if [ "\$KIOSK_BLOCK_KEYS" == "true" ]; then
         block_bind_q="<Control>q"
@@ -1734,11 +1743,14 @@ RELOAD
         block_bind_f12="F12"
         block_bind_l="<Control>l"
         block_bind_info="<Control>i"
+        block_bind_c="<Control><Shift>c"
+        block_bind_e="<Control><Shift>e"
+        block_bind_sw="<Control><Shift>w"
     fi
     
     # Apply Settings
     # Register the list of custom bindings
-    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['\$p0', '\$p1', '\$p2', '\$p3', '\$p4', '\$p5', '\$p6', '\$p7']" 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['\$p0', '\$p1', '\$p2', '\$p3', '\$p4', '\$p5', '\$p6', '\$p7', '\$p8', '\$p9', '\$p10']" 2>/dev/null || true
     
     # Configure Reload
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p0 name 'Kiosk Reload'
@@ -1773,6 +1785,18 @@ RELOAD
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p7 name 'Block Ctrl-I'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p7 command '/bin/true'
     gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p7 binding "\$block_bind_info"
+
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p8 name 'Block Ctrl-Shift-C'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p8 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p8 binding "\$block_bind_c"
+
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p9 name 'Block Ctrl-Shift-E'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p9 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p9 binding "\$block_bind_e"
+
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p10 name 'Block Ctrl-Shift-W'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p10 command '/bin/true'
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$p10 binding "\$block_bind_sw"
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
