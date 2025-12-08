@@ -154,10 +154,13 @@ validate_config() {
     # CIDR validation for NFS networks (force parse from string)
     local nfs_nets=()
     if [[ -n "${NFS_CLIENT_NETS_STR:-}" ]]; then
+        debug "NFS_CLIENT_NETS_STR='$NFS_CLIENT_NETS_STR'"
         read -ra nfs_nets <<< "$NFS_CLIENT_NETS_STR"
+        debug "Parsed ${#nfs_nets[@]} networks: ${nfs_nets[*]}"
     fi
     
     for net in "${nfs_nets[@]}"; do
+        debug "Validating network: '$net'"
         if [[ ! "$net" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
             error "Invalid CIDR notation for NFS network: $net"
             ((errors++)) || true
