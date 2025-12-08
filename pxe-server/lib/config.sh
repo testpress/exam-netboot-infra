@@ -13,6 +13,7 @@ ISO_PATH="${ISO_PATH:-/root/ubuntu-24.04.3-desktop-amd64.iso}"
 WORK_DIR="${WORK_DIR:-/root/pxe_work}"
 PXE_ROOT="${PXE_ROOT:-/srv/pxe/u2404}"
 TFTP_ROOT="${TFTP_ROOT:-/tftp}"
+DOWNLOAD_CACHE="${DOWNLOAD_CACHE:-/var/cache/pxe-server/downloads}"
 
 # Config file locations
 DNSMASQ_CONF="${DNSMASQ_CONF:-/etc/dnsmasq.d/pxe.conf}"

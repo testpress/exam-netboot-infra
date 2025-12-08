@@ -14,23 +14,28 @@ download_and_extract_bootloaders() {
         return 0
     fi
     
+    # Create cache directory
+    mkdir -p "$DOWNLOAD_CACHE"
+    
     cd "$WORK_DIR" || abort "Cannot change to work directory"
     
     # ─────────────────────────────────────────────────────────────────────────
     # Download and extract syslinux (PXELINUX for BIOS boot)
     # ─────────────────────────────────────────────────────────────────────────
     
-    if [[ ! -f "$WORK_DIR/syslinux.zip" ]]; then
-        info "Downloading syslinux..."
-        if ! wget -q -O syslinux.zip "$SYSLINUX_URL"; then
+    local syslinux_zip="$DOWNLOAD_CACHE/syslinux.zip"
+    
+    if [[ ! -f "$syslinux_zip" ]]; then
+        info "Downloading syslinux to cache..."
+        if ! wget -q -O "$syslinux_zip" "$SYSLINUX_URL"; then
             abort "Failed to download syslinux from $SYSLINUX_URL"
         fi
     else
-        debug "Syslinux already downloaded"
+        debug "Using cached syslinux: $syslinux_zip"
     fi
     
     info "Extracting syslinux..."
-    unzip -o syslinux.zip -d "$WORK_DIR" >/dev/null || abort "Failed to extract syslinux"
+    unzip -o "$syslinux_zip" -d "$WORK_DIR" >/dev/null || abort "Failed to extract syslinux"
     
     # ─────────────────────────────────────────────────────────────────────────
     # Download UEFI bootloader packages
@@ -38,21 +43,37 @@ download_and_extract_bootloaders() {
     
     info "Downloading UEFI bootloader packages..."
     
-    # Download .deb packages
+    # Download .deb packages to cache folder first to persist them
+    # We switch to cache dir to download, then extract from there
+    pushd "$DOWNLOAD_CACHE" >/dev/null || abort "Cannot open cache dir"
+    
+    # Only download if not already present (rough check, or just let apt handle caching if configured? 
+    # apt-get download always downloads to cwd. We'll download here.)
+    # To check if we need to download: check if files exist? 
+    # apt-get download is safer to run to get latest updates or missing files.
+    # It will overwrite or create new versions.
+    
     apt-get download shim-signed grub-efi-amd64-signed >/dev/null 2>&1 || {
         warn "Could not download UEFI packages (non-fatal)"
     }
     
-    # Extract downloaded packages
-    for deb in shim-signed*.deb grub-efi-amd64-signed*.deb; do
-        if [[ -f "$deb" ]]; then
+    local deb_files=(shim-signed*.deb grub-efi-amd64-signed*.deb)
+    popd >/dev/null
+    
+    # Extract downloaded packages from cache to work dir
+    for deb in "${deb_files[@]}"; do
+        # Deb files are in cache, need full path
+        local deb_path="$DOWNLOAD_CACHE/$deb"
+        
+        # Check if glob expanded
+        if [[ -f "$deb_path" ]]; then
             local pkg_dir="${WORK_DIR}/pkg_${deb%.deb}"
-            debug "Extracting $deb to $pkg_dir"
-            dpkg -x "$deb" "$pkg_dir" 2>/dev/null || true
+            debug "Extracting $deb_path to $pkg_dir"
+            dpkg -x "$deb_path" "$pkg_dir" 2>/dev/null || true
         fi
     done
     
-    log_success "Bootloaders downloaded and extracted"
+    log_success "Bootloaders prepared (using cache at $DOWNLOAD_CACHE)"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

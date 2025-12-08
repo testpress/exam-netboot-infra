@@ -447,7 +447,7 @@ main() {
     
     # Validate configuration
     validate_config
-    
+
     # Confirm with user (if interactive)
     confirm_proceed
     
