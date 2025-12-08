@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T10:48:28Z"
+readonly BUILD_DATE="2025-12-08T11:05:01Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1646,26 +1646,28 @@ block_keys() {
 
 setup_reload_shortcut() {
     if [ "\$KIOSK_ENABLE_XBINDKEYS" != "true" ]; then
-        echo "\$(date -Iseconds) Skipping xbindkeys (debug mode)" >> "\$LOG"
+        echo "\$(date -Iseconds) Skipping reload shortcut (debug mode)" >> "\$LOG"
         return
     fi
     
-    local kiosk_dir="/home/\$KIOSK_USER/.kiosk"
-    mkdir -p "\$kiosk_dir"
+    echo "\$(date -Iseconds) Setting up Ctrl+Alt+R reload shortcut (GNOME)" >> "\$LOG"
     
-    # Create xbindkeys config
-    cat > "\$kiosk_dir/.xbindkeysrc" <<XBIND
-# Reload Firefox (Ctrl + Alt + R)
-"pkill -u \$KIOSK_USER firefox; sleep 0.5; firefox --kiosk --private-window '\$KIOSK_URL' --new-instance &"
-  control+alt + r
-XBIND
+    # Create the reload script
+    local reload_script="/home/\$KIOSK_USER/kiosk_reload.sh"
+    cat > "\$reload_script" <<RELOAD_SCRIPT
+#!/bin/bash
+pkill -u \$KIOSK_USER firefox; sleep 0.5; firefox --kiosk --private-window '\$KIOSK_URL' --new-instance &
+RELOAD_SCRIPT
+    chmod +x "\$reload_script"
+    chown "\$KIOSK_USER:\$KIOSK_USER" "\$reload_script"
     
-    chown -R "\$KIOSK_USER:\$KIOSK_USER" "\$kiosk_dir"
+    # Configure GNOME custom keybinding
+    local key_path="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/"
     
-    # Start xbindkeys
-    pkill -u "\$KIOSK_USER" xbindkeys 2>/dev/null || true
-    xbindkeys -f "\$kiosk_dir/.xbindkeysrc" &
-    echo "\$(date -Iseconds) xbindkeys started (Ctrl+Alt+R to reload)" >> "\$LOG"
+    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['\$key_path']" 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$key_path name 'Kiosk Reload' 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$key_path command "\$reload_script" 2>/dev/null || true
+    gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:\$key_path binding '<Control><Alt>r' 2>/dev/null || true
 }
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -2107,7 +2109,6 @@ list_steps() {
     echo ""
 }
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Argument Parsing
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2362,9 +2363,6 @@ main() {
     # Validate configuration
     validate_config
 
-    # Ensure work directory exists (needed for almost all steps, especially if running single step)
-    mkdir -p "$WORK_DIR"
-    
     # Confirm with user (if interactive)
     confirm_proceed
     
