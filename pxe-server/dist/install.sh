@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T12:29:00Z"
+readonly BUILD_DATE="2025-12-08T13:00:48Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -1501,6 +1501,7 @@ perform_kiosk_customization() {
     _inject_kiosk_autostart "$unsquash_dir"
     _inject_kiosk_policies "$unsquash_dir"
     _inject_kiosk_service "$unsquash_dir"
+    _inject_kiosk_extensions "$unsquash_dir"
     
     # ─────────────────────────────────────────────────────────────────────────
     # Repack the squashfs
@@ -1780,10 +1781,15 @@ RELOAD
 
 harden_desktop() {
     echo "\$(date -Iseconds) Hardening desktop UI elements" >> "\$LOG"
-    # Disable Hot Corners (Activities)
-    gsettings set org.gnome.desktop.interface enable-hot-corners false 2>/dev/null || true
     
-    # Hide Ubuntu Dock
+    # Disable Ubuntu Dock Extension (Robust method)
+    gnome-extensions disable ubuntu-dock@ubuntu.com 2>/dev/null || true
+    
+    # Enable Hide Top Bar Extension
+    gnome-extensions enable hidetopbar@mathieu.bidon.ca 2>/dev/null || true
+    
+    # Fallbacks via gsettings
+    gsettings set org.gnome.desktop.interface enable-hot-corners false 2>/dev/null || true
     gsettings set org.gnome.shell.extensions.dash-to-dock autohide true 2>/dev/null || true
     gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed false 2>/dev/null || true
     gsettings set org.gnome.shell.extensions.dash-to-dock intellihide false 2>/dev/null || true
@@ -1829,6 +1835,55 @@ KIOSK_SCRIPT
 
     chmod +x "$autostart_path"
     debug "Autostart script created at $autostart_path"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Kiosk Extensions Injection
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_inject_kiosk_extensions() {
+    local rootdir="$1"
+    local extensions_dir="$rootdir/usr/share/gnome-shell/extensions"
+    mkdir -p "$extensions_dir"
+    
+    info "Injecting GNOME Extensions..."
+    
+    # Install 'Hide Top Bar' from GitHub
+    local ext_uuid="hidetopbar@mathieu.bidon.ca"
+    local ext_path="$extensions_dir/$ext_uuid"
+    
+    if [ ! -d "$ext_path" ]; then
+        info "Downloading Hide Top Bar extension..."
+        local tmp_ext=$(mktemp -d)
+        
+        # Download master branch
+        if wget -qO "$tmp_ext/extension.zip" "https://github.com/tuxor1337/hidetopbar/archive/refs/heads/master.zip"; then
+            unzip -q "$tmp_ext/extension.zip" -d "$tmp_ext"
+            
+            local src_dir="$tmp_ext/hidetopbar-master"
+            if [ -d "$src_dir" ]; then
+                mkdir -p "$ext_path"
+                cp -r "$src_dir"/* "$ext_path/"
+                
+                # Compile Schemas if glib-compile-schemas is available
+                if command -v glib-compile-schemas >/dev/null; then
+                     glib-compile-schemas "$ext_path/schemas" 2>/dev/null || warn "Failed to compile schemas for hidetopbar"
+                else
+                     warn "glib-compile-schemas not found - extension settings might fail"
+                fi
+                
+                debug "Installed Hide Top Bar extension to $ext_path"
+            else
+                warn "Failed to extract Hide Top Bar (structure mismatch)"
+            fi
+        else
+            warn "Failed to download Hide Top Bar extension"
+        fi
+        
+        rm -rf "$tmp_ext"
+    else
+        debug "Hide Top Bar extension already exists"
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
