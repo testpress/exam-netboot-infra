@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T08:24:34Z"
+readonly BUILD_DATE="2025-12-08T08:28:22Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -454,7 +454,11 @@ validate_config() {
         fi
     fi
     
-    # CIDR validation for NFS networks
+    # CIDR validation for NFS networks (ensure array is populated)
+    if [[ ${#NFS_CLIENT_NETS[@]} -eq 0 ]] && [[ -n "${NFS_CLIENT_NETS_STR:-}" ]]; then
+        read -ra NFS_CLIENT_NETS <<< "$NFS_CLIENT_NETS_STR"
+    fi
+    
     for net in "${NFS_CLIENT_NETS[@]}"; do
         if [[ ! "$net" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
             error "Invalid CIDR notation for NFS network: $net"
