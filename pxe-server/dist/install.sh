@@ -27,7 +27,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly VERSION="2025.12.08"
-readonly BUILD_DATE="2025-12-08T08:52:01Z"
+readonly BUILD_DATE="2025-12-08T08:55:34Z"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # lib/logging.sh
@@ -455,16 +455,7 @@ validate_config() {
         fi
     fi
     
-    # CIDR validation for NFS networks (use word splitting for portability)
-    # shellcheck disable=SC2206
-    local nfs_nets=(${NFS_CLIENT_NETS_STR:-})
-    
-    for net in "${nfs_nets[@]}"; do
-        if [[ ! "$net" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
-            error "Invalid CIDR notation for NFS network: $net"
-            ((errors++)) || true
-        fi
-    done
+    # Note: NFS_CLIENT_NETS validation removed - the nfs step will fail if invalid
     
     # DHCP range validation
     if [[ ! "$DHCP_RANGE_START" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
