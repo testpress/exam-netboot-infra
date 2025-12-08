@@ -52,21 +52,17 @@ preflight_checks() {
         debug "Disk space OK: ${free_gb}GB available"
     fi
     
-    # ISO validation
-    if [[ ! -f "$ISO_PATH" ]]; then
-        if [[ "${DRY_RUN:-false}" == true ]]; then
-            warn "ISO not found: $ISO_PATH (continuing in dry-run mode)"
-            ((warnings++))
-        else
-            error "ISO not found: $ISO_PATH"
-            error "  Download from: https://ubuntu.com/download/desktop"
+    # ISO validation (warning only - iso_download step can get it)
+    if [[ -n "${ISO_PATH:-}" ]] && [[ -f "$ISO_PATH" ]]; then
+        if [[ ! -r "$ISO_PATH" ]]; then
+            error "ISO not readable: $ISO_PATH"
             ((errors++))
+        else
+            debug "ISO found: $ISO_PATH"
         fi
-    elif [[ ! -r "$ISO_PATH" ]]; then
-        error "ISO not readable: $ISO_PATH"
-        ((errors++))
     else
-        debug "ISO found: $ISO_PATH"
+        # ISO not found - iso_download step will handle it
+        info "ISO not found locally - will be downloaded in iso_download step"
     fi
     
     # ─────────────────────────────────────────────────────────────────────────
