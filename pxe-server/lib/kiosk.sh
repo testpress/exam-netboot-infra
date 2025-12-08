@@ -113,7 +113,8 @@ Environment=DISPLAY=:0
 Environment=XAUTHORITY=/home/${KIOSK_USER}/.Xauthority
 ExecStart=/usr/bin/firefox --kiosk --private-window ${KIOSK_URL} --new-instance
 Restart=always
-RestartSec=2
+RestartSec=0
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=graphical.target
