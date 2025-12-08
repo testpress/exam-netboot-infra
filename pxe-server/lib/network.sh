@@ -47,10 +47,18 @@ detect_network_interface_and_ip() {
     fi
     
     # Get IP address from the selected interface
+    # Ensure interface is up first
+    ip link set "$DEFAULT_IF" up 2>/dev/null || true
     SERVER_IP=$(ip -4 addr show "$DEFAULT_IF" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1 || true)
     
     if [[ -z "$SERVER_IP" ]]; then
-        abort "Cannot determine IP address for $DEFAULT_IF. Ensure it has an IP configured."
+        # No IP on interface - use static IP if configured (extract IP without CIDR)
+        if [[ -n "${STATIC_IP:-}" ]]; then
+            SERVER_IP="${STATIC_IP%/*}"
+            info "Interface $DEFAULT_IF has no IP, will use static IP: $SERVER_IP"
+        else
+            abort "Interface $DEFAULT_IF has no IP. Either configure static IP with --static-ip or bring up the interface first."
+        fi
     fi
     
     info "Network interface: $DEFAULT_IF"
